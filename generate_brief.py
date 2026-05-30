@@ -12,7 +12,7 @@ import csv
 import io
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-AV_API_KEY = os.environ.get('AV_API_KEY', 'CP93A6VZ8592MCDN')
+AV_API_KEY = os.environ.get('AV_API_KEY', '')  # set via GitHub Secret or local env
 
 # ---------------------------------------------------------------------------
 # LIVE FETCH HELPERS
@@ -1463,3 +1463,142 @@ line_count = html.count("\n")
 print(f"Written: {out_path}")
 print(f"Size:    {size_bytes:,} bytes ({size_kb:.1f} KB)")
 print(f"Lines:   {line_count:,}")
+
+# ---------------------------------------------------------------------------
+# EMAIL SUMMARY  (runs only when GMAIL_USER + GMAIL_APP_PASSWORD are set)
+# ---------------------------------------------------------------------------
+_gmail_user = os.environ.get('GMAIL_USER', '')
+_gmail_pass = os.environ.get('GMAIL_APP_PASSWORD', '')
+_to_email   = os.environ.get('TO_EMAIL', _gmail_user)
+
+if _gmail_user and _gmail_pass:
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    # Build link to full brief from GitHub Actions env (no extra secret needed)
+    _repo = os.environ.get('GITHUB_REPOSITORY', '')
+    if _repo and '/' in _repo:
+        _gh_user, _gh_repo = _repo.split('/', 1)
+        _brief_url = f'https://{_gh_user}.github.io/{_gh_repo}/'
+    else:
+        _brief_url = '#'
+
+    def _ec(val, invert=False):
+        """Inline-styled change span for email (no CSS vars)."""
+        if val is None:
+            return '<span style="color:#7a92b4">—</span>'
+        pos = (val >= 0) if not invert else (val < 0)
+        col = '#2fcb9a' if pos else '#f05a52'
+        arrow = '▲' if val >= 0 else '▼'
+        sign  = '+' if val >= 0 else ''
+        return f'<span style="color:{col}">{arrow} {sign}{val:.2f}%</span>'
+
+    def _tile(label, value, chg_html, extra=''):
+        return f"""
+        <td style="padding:12px 14px;border-right:1px solid #1b2d4f;vertical-align:top">
+          <div style="font-size:10px;color:#7a92b4;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">{label}</div>
+          <div style="font-size:20px;font-weight:700;margin-bottom:4px">{value}</div>
+          <div style="font-size:12px">{chg_html}</div>
+          {f'<div style="font-size:11px;color:#7a92b4;margin-top:2px">{extra}</div>' if extra else ''}
+        </td>"""
+
+    _io_val  = f'{iron_ore_last:.2f}' if iron_ore_last else '—'
+    _am_sign = '+' if data['am_net']  >= 0 else ''
+    _lf_sign = '+' if data['lev_net'] >= 0 else ''
+    _am_col  = '#f05a52' if data['am_net_chg'] < 0 else '#2fcb9a'
+    _lf_col  = '#f05a52' if data['lev_net_chg'] < 0 else '#2fcb9a'
+    _am_arr  = '▼' if data['am_net_chg'] < 0 else '▲'
+    _lf_arr  = '▼' if data['lev_net_chg'] < 0 else '▲'
+
+    _email_html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#070d18;font-family:Arial,Helvetica,sans-serif;color:#e2eaf6">
+<div style="max-width:620px;margin:0 auto;padding:24px 16px">
+
+  <!-- Header -->
+  <div style="border-bottom:2px solid #f0b329;padding-bottom:12px;margin-bottom:20px">
+    <div style="font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#7a92b4;margin-bottom:4px">AUD/USD Daily Brief</div>
+    <div style="font-size:22px;font-weight:700;color:#f0b329">{today_long}</div>
+    <div style="font-size:11px;color:#7a92b4;margin-top:3px">Data as of {data_date_str}</div>
+  </div>
+
+  <!-- FX row -->
+  <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#3d5270;margin-bottom:6px">FX &amp; Rates</div>
+  <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#101e36;border:1px solid #1b2d4f;margin-bottom:2px">
+    <tr>
+      {_tile('AUD / USD', f'{data["audusd"]:.4f}', _ec(audusd_chg))}
+      {_tile('DXY Index', f'{data["dxy"]:.3f}', _ec(dxy_chg, invert=True))}
+      {_tile('AU−US 2y Spread', f'{data["spread_2y"]} bp',
+             f'<span style="color:#7a92b4">AU {data["au2y"]:.3f}% / US {data["us2y"]:.2f}%</span>')}
+    </tr>
+  </table>
+  <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#0c1525;border:1px solid #1b2d4f;border-top:none;margin-bottom:16px">
+    <tr>
+      {_tile('AUD / JPY', f'{data["audjpy"]:.3f}', _ec(audjpy_chg))}
+      {_tile('USD / CNH', f'{data["usdcnh"]:.4f}', '<span style="color:#7a92b4">offshore RMB</span>')}
+      {_tile('VIX', f'{data["vix"]:.2f}', _ec(vix_chg, invert=True))}
+    </tr>
+  </table>
+
+  <!-- Commodities -->
+  <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#3d5270;margin-bottom:6px">Commodities &amp; Markets</div>
+  <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#101e36;border:1px solid #1b2d4f;margin-bottom:2px">
+    <tr>
+      {_tile('Gold (GC=F)', f'{data["gold"]:,.1f}', _ec(gold_chg))}
+      {_tile('Iron Ore (TIO=F)', _io_val, _ec(iron_ore_chg))}
+      {_tile('Copper (HG=F)', f'{data["copper"]:.3f}', _ec(copper_chg))}
+    </tr>
+  </table>
+  <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#0c1525;border:1px solid #1b2d4f;border-top:none;margin-bottom:16px">
+    <tr>
+      {_tile('S&amp;P 500', f'{data["spx"]:,.0f}', _ec(spx_chg))}
+      {_tile('Hang Seng', f'{data["hsi"]:,.0f}', _ec(hsi_chg))}
+      {_tile('CSI 300', f'{data["csi300"]:,.0f}', _ec(csi300_chg))}
+    </tr>
+  </table>
+
+  <!-- COT -->
+  <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#3d5270;margin-bottom:6px">COT Positioning — CFTC TFF ({cot_date})</div>
+  <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#101e36;border:1px solid #1b2d4f;margin-bottom:20px">
+    <tr>
+      <td style="padding:14px 16px;border-right:1px solid #1b2d4f;vertical-align:top">
+        <div style="font-size:10px;color:#7a92b4;margin-bottom:4px">Asset Manager Net</div>
+        <div style="font-size:22px;font-weight:700">{_am_sign}{data['am_net']:,}</div>
+        <div style="font-size:12px;color:{_am_col};margin-top:4px">{_am_arr} {abs(data['am_net_chg']):,} WoW</div>
+      </td>
+      <td style="padding:14px 16px;vertical-align:top">
+        <div style="font-size:10px;color:#7a92b4;margin-bottom:4px">Leveraged Funds Net</div>
+        <div style="font-size:22px;font-weight:700">{_lf_sign}{data['lev_net']:,}</div>
+        <div style="font-size:12px;color:{_lf_col};margin-top:4px">{_lf_arr} {abs(data['lev_net_chg']):,} WoW</div>
+      </td>
+    </tr>
+  </table>
+
+  <!-- CTA -->
+  <div style="text-align:center;padding:16px 0;border-top:1px solid #1b2d4f;margin-bottom:16px">
+    <a href="{_brief_url}" style="display:inline-block;background:#f0b329;color:#070d18;font-weight:700;font-size:13px;padding:12px 32px;border-radius:6px;text-decoration:none;letter-spacing:.06em">VIEW FULL BRIEF &amp; CHARTS →</a>
+    <div style="font-size:11px;color:#3d5270;margin-top:10px">Interactive rate differential and COT charts</div>
+  </div>
+
+  <div style="font-size:10px;color:#3d5270;border-top:1px solid #1b2d4f;padding-top:12px">
+    Yahoo Finance · RBA · Alpha Vantage · CFTC · Auto-generated via GitHub Actions
+  </div>
+</div>
+</body></html>"""
+
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f'AUD/USD Brief — {today_long}'
+        msg['From']    = _gmail_user
+        msg['To']      = _to_email
+        msg.attach(MIMEText(_email_html, 'html'))
+
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as _srv:
+            _srv.login(_gmail_user, _gmail_pass)
+            _srv.sendmail(_gmail_user, _to_email, msg.as_string())
+        print(f'Email sent → {_to_email}')
+    except Exception as e:
+        print(f'Warning – email failed: {e}')
+else:
+    print('Email skipped (GMAIL_USER not set)')

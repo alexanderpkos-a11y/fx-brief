@@ -27,9 +27,12 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Generate brief
+      - name: Generate brief and send email
         env:
-          AV_API_KEY: ${{ secrets.AV_API_KEY }}
+          AV_API_KEY:         ${{ secrets.AV_API_KEY }}
+          GMAIL_USER:         ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          TO_EMAIL:           ${{ secrets.TO_EMAIL }}
         run: python3 generate_brief.py
 
       - name: Commit and push
