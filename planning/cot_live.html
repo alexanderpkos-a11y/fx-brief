@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AUD COT Positioning</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --ink:#0c1320; --ink-2:#111b2e; --panel:#15233b; --panel-edge:#22344f;
+    --text:#e8eef7; --text-dim:#8ea2bd; --text-faint:#5e718c;
+    --aud:#5b9bd5;        /* AUD/USD price  */
+    --am:#5ec2a0;         /* asset managers */
+    --lev:#e8915b;        /* leveraged funds */
+    --gold:#e9b949;       /* dawn accent */
+    --grid:rgba(142,162,189,.10);
+    --warn-bg:rgba(233,185,73,.10); --warn-edge:rgba(233,185,73,.45);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--text);
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(233,185,73,.10), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(91,155,213,.10), transparent 55%),
+      linear-gradient(180deg,var(--ink),var(--ink-2));
+    background-attachment:fixed;min-height:100vh;padding:32px 24px 56px;-webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  .eyebrow{font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--gold);margin-bottom:14px;display:flex;gap:10px;align-items:center}
+  .eyebrow::before{content:"";width:26px;height:1px;background:var(--gold);display:inline-block}
+  h1{font-family:'Fraunces',serif;font-weight:600;font-size:clamp(28px,4.4vw,46px);line-height:1.04;letter-spacing:-.01em;max-width:18ch}
+  h1 em{font-style:italic;color:var(--aud)}
+  .sub{color:var(--text-dim);font-size:13px;margin-top:14px;max-width:64ch;line-height:1.6}
+  .banner{margin:22px 0 26px;padding:11px 16px;border:1px solid var(--warn-edge);background:var(--warn-bg);border-radius:8px;font-size:12px;color:#f0d68a;display:flex;gap:10px;align-items:flex-start;line-height:1.5}
+  .banner b{color:var(--gold)}
+  .banner code{color:#f0d68a;background:rgba(255,255,255,.05);padding:2px 6px;border-radius:4px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px}
+  .card{background:linear-gradient(180deg,var(--panel),rgba(21,35,59,.6));border:1px solid var(--panel-edge);border-radius:12px;padding:16px 18px}
+  .card .lbl{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-faint)}
+  .card .val{font-family:'Fraunces',serif;font-size:28px;font-weight:600;margin-top:8px;letter-spacing:-.01em}
+  .card .chg{font-size:12px;margin-top:6px;color:var(--text-dim)}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:middle}
+  .dot.aud{background:var(--aud)}.dot.am{background:var(--am)}.dot.lev{background:var(--lev)}
+  .up{color:#6fcf8e}.down{color:#e8746a}
+  .panel-box{background:linear-gradient(180deg,var(--panel),rgba(17,27,46,.55));border:1px solid var(--panel-edge);border-radius:16px;padding:22px 22px 10px;box-shadow:0 24px 60px -30px rgba(0,0,0,.8);position:relative}
+  .panel-title{font-family:'Fraunces',serif;font-size:18px;font-weight:600;margin-bottom:2px}
+  .legend{display:flex;gap:18px;font-size:12px;color:var(--text-dim);margin:10px 0 16px;flex-wrap:wrap}
+  .legend span{display:flex;align-items:center}
+  .chart-holder{position:relative;height:400px;width:100%}
+  .watermark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;font-family:'Fraunces',serif;font-size:54px;font-weight:600;color:rgba(255,255,255,.04);letter-spacing:.08em;transform:rotate(-8deg)}
+  .slider-wrap{margin:26px 4px 14px}
+  .slider-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px}
+  .slider-head .k{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-faint)}
+  .range-readout{font-size:13px}.range-readout b{color:var(--gold)}
+  .dual{position:relative;height:34px}
+  .track{position:absolute;top:15px;left:0;right:0;height:4px;background:var(--panel-edge);border-radius:4px}
+  .track-fill{position:absolute;top:15px;height:4px;background:linear-gradient(90deg,var(--aud),var(--gold));border-radius:4px}
+  .dual input[type=range]{-webkit-appearance:none;appearance:none;position:absolute;top:0;left:0;width:100%;height:34px;background:none;pointer-events:none;margin:0}
+  .dual input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;pointer-events:all;width:18px;height:18px;border-radius:50%;background:var(--gold);border:3px solid var(--ink-2);cursor:grab;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+  .dual input[type=range]::-moz-range-thumb{pointer-events:all;width:18px;height:18px;border-radius:50%;background:var(--gold);border:3px solid var(--ink-2);cursor:grab;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+  .dual input[type=range]::-webkit-slider-runnable-track{background:none;height:34px}
+  .dual input[type=range]::-moz-range-track{background:none;height:34px}
+  .presets{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}
+  .preset{font-family:inherit;font-size:11.5px;letter-spacing:.06em;color:var(--text-dim);background:transparent;border:1px solid var(--panel-edge);padding:7px 13px;border-radius:20px;cursor:pointer;transition:.18s}
+  .preset:hover{border-color:var(--aud);color:var(--text)}
+  .preset.active{background:var(--aud);border-color:var(--aud);color:var(--ink);font-weight:600}
+  .source{margin-top:26px;font-size:11px;color:var(--text-faint);letter-spacing:.03em}
+  .source code{color:var(--text-dim);background:rgba(255,255,255,.04);padding:2px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">Morning markets &nbsp;·&nbsp; Positioning</div>
+  <h1>Who's positioned in the <em>Aussie?</em></h1>
+  <p class="sub">CFTC Commitments of Traders &mdash; weekly net positions in Australian Dollar futures for Asset Managers (institutions) and Leveraged Funds (hedge funds &amp; CTAs), against AUD/USD spot. A net long above zero means the group is, on balance, betting the Aussie rises.</p>
+
+  <div class="banner">
+    <span>⚠️</span>
+    <div><b>SAMPLE DATA — not real positioning.</b> Replace the <code>SERIES</code> array in the script (see the <code>DATA SLOT</code> comment) with your pipeline&rsquo;s real output before relying on it.</div>
+  </div>
+
+  <div class="stats">
+    <div class="card">
+      <div class="lbl"><span class="dot aud"></span>AUD/USD — latest</div>
+      <div class="val" id="audVal">—</div>
+      <div class="chg" id="audChg">—</div>
+    </div>
+    <div class="card">
+      <div class="lbl"><span class="dot am"></span>Asset Mgr net</div>
+      <div class="val" id="amVal">—</div>
+      <div class="chg" id="amChg">—</div>
+    </div>
+    <div class="card">
+      <div class="lbl"><span class="dot lev"></span>Leveraged Funds net</div>
+      <div class="val" id="levVal">—</div>
+      <div class="chg" id="levChg">—</div>
+    </div>
+  </div>
+
+  <div class="panel-box">
+    <div class="panel-title">AUD futures — speculative positioning vs price</div>
+    <div class="legend">
+      <span><span class="dot aud"></span>AUD/USD (LHS)</span>
+      <span><span class="dot am"></span>Asset Mgr net, contracts (RHS)</span>
+      <span><span class="dot lev"></span>Leveraged Funds net, contracts (RHS)</span>
+    </div>
+    <div class="chart-holder">
+      <div class="watermark">SAMPLE</div>
+      <canvas id="chart"></canvas>
+    </div>
+
+    <div class="slider-wrap">
+      <div class="slider-head">
+        <div class="k">Date range</div>
+        <div class="range-readout"><b id="rangeStart">—</b> &nbsp;→&nbsp; <b id="rangeEnd">—</b></div>
+      </div>
+      <div class="dual">
+        <div class="track"></div>
+        <div class="track-fill" id="trackFill"></div>
+        <input type="range" id="minR" min="0" max="100" value="0">
+        <input type="range" id="maxR" min="0" max="100" value="100">
+      </div>
+      <div class="presets" id="presets">
+        <button class="preset" data-y="1">1Y</button>
+        <button class="preset" data-y="2">2Y</button>
+        <button class="preset" data-y="5">5Y</button>
+        <button class="preset active" data-y="0">Max</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="source">
+    Source: <i>your pipeline</i> · template by Claude. Net position = long &minus; short contracts.
+    COT is weekly (Tuesday close, released Friday).
+  </p>
+
+</div>
+
+<script>
+/* ============================================================================
+   DATA SLOT  —  THIS IS THE ONLY THING YOUR PIPELINE NEEDS TO REPLACE
+   ----------------------------------------------------------------------------
+   Provide an array named SERIES, sorted oldest → newest, each item:
+       { date:"YYYY-MM-DD", audusd:<number>, am_net:<int>, lev_net:<int> }
+     am_net  = asset_mgr_positions_long  − asset_mgr_positions_short
+     lev_net = lev_money_positions_long  − lev_money_positions_short
+
+   Sourcing (handled by build_cot_dashboard.py):
+     • audusd        → Alpha Vantage FX_DAILY (AUD/USD), sampled on COT dates
+     • am_net/lev_net→ CFTC TFF Futures-Only dataset gpe5-46if (free, no key),
+                       filtered to AUSTRALIAN DOLLAR.
+   The block below only GENERATES sample data. Delete it and assign your real
+   array to SERIES.
+   ========================================================================== */
+
+/*__DATA_START__*/
+const IS_SAMPLE = false;
+const SERIES = [{"date":"2016-06-07","audusd":0.745,"am_net":14918,"lev_net":-5100},{"date":"2016-06-14","audusd":0.735,"am_net":17221,"lev_net":-2666},{"date":"2016-06-21","audusd":0.7455,"am_net":16622,"lev_net":-5878},{"date":"2016-06-28","audusd":0.7393,"am_net":5774,"lev_net":-5084},{"date":"2016-07-05","audusd":0.7446,"am_net":4794,"lev_net":1510},{"date":"2016-07-12","audusd":0.7617,"am_net":9824,"lev_net":15449},{"date":"2016-07-19","audusd":0.7514,"am_net":9118,"lev_net":27639},{"date":"2016-07-26","audusd":0.7518,"am_net":7862,"lev_net":31853},{"date":"2016-08-02","audusd":0.7605,"am_net":12225,"lev_net":24550},{"date":"2016-08-09","audusd":0.7668,"am_net":13633,"lev_net":23684},{"date":"2016-08-16","audusd":0.7696,"am_net":13458,"lev_net":28846},{"date":"2016-08-23","audusd":0.7613,"am_net":13749,"lev_net":27413},{"date":"2016-08-30","audusd":0.7515,"am_net":8417,"lev_net":29689},{"date":"2016-09-06","audusd":0.7676,"am_net":8666,"lev_net":31729},{"date":"2016-09-13","audusd":0.7459,"am_net":2703,"lev_net":27779},{"date":"2016-09-20","audusd":0.7556,"am_net":8017,"lev_net":2410},{"date":"2016-09-27","audusd":0.7668,"am_net":14190,"lev_net":10630},{"date":"2016-10-04","audusd":0.7616,"am_net":15790,"lev_net":26456},{"date":"2016-10-11","audusd":0.7551,"am_net":17395,"lev_net":30341},{"date":"2016-10-18","audusd":0.7669,"am_net":15510,"lev_net":39311},{"date":"2016-10-25","audusd":0.7642,"am_net":14233,"lev_net":41868},{"date":"2016-11-01","audusd":0.7653,"am_net":12676,"lev_net":47233},{"date":"2016-11-08","audusd":0.774,"am_net":11063,"lev_net":51871},{"date":"2016-11-15","audusd":0.7555,"am_net":3526,"lev_net":44125},{"date":"2016-11-22","audusd":0.7402,"am_net":-1631,"lev_net":19565},{"date":"2016-11-29","audusd":0.7486,"am_net":-3488,"lev_net":11724},{"date":"2016-12-06","audusd":0.7459,"am_net":-2213,"lev_net":7450},{"date":"2016-12-13","audusd":0.7493,"am_net":485,"lev_net":9816},{"date":"2016-12-20","audusd":0.7264,"am_net":-5779,"lev_net":1416},{"date":"2016-12-27","audusd":0.7184,"am_net":-11834,"lev_net":-5051},{"date":"2017-01-03","audusd":0.7221,"am_net":-14302,"lev_net":-11805},{"date":"2017-01-10","audusd":0.7363,"am_net":-7086,"lev_net":-20126},{"date":"2017-01-17","audusd":0.7557,"am_net":4965,"lev_net":-9020},{"date":"2017-01-24","audusd":0.7582,"am_net":9762,"lev_net":8212},{"date":"2017-01-31","audusd":0.7579,"am_net":5957,"lev_net":22289},{"date":"2017-02-07","audusd":0.7623,"am_net":4229,"lev_net":32872},{"date":"2017-02-14","audusd":0.7673,"am_net":5669,"lev_net":40089},{"date":"2017-02-21","audusd":0.7671,"am_net":7660,"lev_net":45742},{"date":"2017-02-28","audusd":0.7652,"am_net":14784,"lev_net":53456},{"date":"2017-03-07","audusd":0.7587,"am_net":9785,"lev_net":54415},{"date":"2017-03-14","audusd":0.7558,"am_net":5620,"lev_net":38581},{"date":"2017-03-21","audusd":0.768,"am_net":15993,"lev_net":45754},{"date":"2017-03-28","audusd":0.7635,"am_net":22726,"lev_net":53096},{"date":"2017-04-04","audusd":0.7567,"am_net":21021,"lev_net":50607},{"date":"2017-04-11","audusd":0.7502,"am_net":13165,"lev_net":41155},{"date":"2017-04-18","audusd":0.7555,"am_net":9294,"lev_net":37943},{"date":"2017-04-25","audusd":0.754,"am_net":12798,"lev_net":29851},{"date":"2017-05-02","audusd":0.7539,"am_net":6340,"lev_net":26112},{"date":"2017-05-09","audusd":0.7348,"am_net":-2563,"lev_net":16957},{"date":"2017-05-16","audusd":0.7429,"am_net":-10068,"lev_net":4746},{"date":"2017-05-23","audusd":0.7477,"am_net":-1685,"lev_net":-8829},{"date":"2017-05-30","audusd":0.746,"am_net":-2577,"lev_net":-5807},{"date":"2017-06-06","audusd":0.7513,"am_net":-3128,"lev_net":-9365},{"date":"2017-06-13","audusd":0.7534,"am_net":-5033,"lev_net":-8205},{"date":"2017-06-20","audusd":0.758,"am_net":-4499,"lev_net":11018},{"date":"2017-06-27","audusd":0.7587,"am_net":-5146,"lev_net":18616},{"date":"2017-07-03","audusd":0.766,"am_net":174,"lev_net":29910},{"date":"2017-07-11","audusd":0.7637,"am_net":-2431,"lev_net":38290},{"date":"2017-07-18","audusd":0.7911,"am_net":-4832,"lev_net":52847},{"date":"2017-07-25","audusd":0.7938,"am_net":-2739,"lev_net":54509},{"date":"2017-08-01","audusd":0.796,"am_net":-4893,"lev_net":58781},{"date":"2017-08-08","audusd":0.7911,"am_net":-6888,"lev_net":71503},{"date":"2017-08-15","audusd":0.7821,"am_net":-9696,"lev_net":78999},{"date":"2017-08-22","audusd":0.7912,"am_net":-7699,"lev_net":80448},{"date":"2017-08-29","audusd":0.7955,"am_net":-4305,"lev_net":85379},{"date":"2017-09-05","audusd":0.8003,"am_net":-532,"lev_net":83232},{"date":"2017-09-12","audusd":0.8018,"am_net":376,"lev_net":80720},{"date":"2017-09-19","audusd":0.8006,"am_net":5615,"lev_net":78346},{"date":"2017-09-26","audusd":0.7884,"am_net":1477,"lev_net":83332},{"date":"2017-10-03","audusd":0.7833,"am_net":-7002,"lev_net":85597},{"date":"2017-10-10","audusd":0.778,"am_net":-10013,"lev_net":82369},{"date":"2017-10-17","audusd":0.7842,"am_net":-8377,"lev_net":69113},{"date":"2017-10-24","audusd":0.7775,"am_net":-11586,"lev_net":67932},{"date":"2017-10-31","audusd":0.7652,"am_net":-16625,"lev_net":62528},{"date":"2017-11-07","audusd":0.7649,"am_net":-19667,"lev_net":56714},{"date":"2017-11-14","audusd":0.7629,"am_net":-24011,"lev_net":54142},{"date":"2017-11-21","audusd":0.7575,"am_net":-29693,"lev_net":53109},{"date":"2017-11-28","audusd":0.7601,"am_net":-30985,"lev_net":50186},{"date":"2017-12-05","audusd":0.7605,"am_net":-33939,"lev_net":48561},{"date":"2017-12-12","audusd":0.7552,"am_net":-35174,"lev_net":46042},{"date":"2017-12-19","audusd":0.766,"am_net":-32929,"lev_net":11233},{"date":"2017-12-26","audusd":0.7725,"am_net":-27889,"lev_net":645},{"date":"2018-01-02","audusd":0.7826,"am_net":-18638,"lev_net":-9706},{"date":"2018-01-09","audusd":0.7821,"am_net":-12546,"lev_net":14451},{"date":"2018-01-16","audusd":0.7956,"am_net":-8490,"lev_net":19794},{"date":"2018-01-23","audusd":0.7995,"am_net":-4480,"lev_net":25693},{"date":"2018-01-30","audusd":0.8085,"am_net":-1570,"lev_net":26626},{"date":"2018-02-06","audusd":0.7906,"am_net":1521,"lev_net":29762},{"date":"2018-02-13","audusd":0.7854,"am_net":-4083,"lev_net":28099},{"date":"2018-02-20","audusd":0.7879,"am_net":-5449,"lev_net":30666},{"date":"2018-02-27","audusd":0.7796,"am_net":-5085,"lev_net":30637},{"date":"2018-03-06","audusd":0.7807,"am_net":-13169,"lev_net":30068},{"date":"2018-03-13","audusd":0.7855,"am_net":-5933,"lev_net":15938},{"date":"2018-03-20","audusd":0.7686,"am_net":-12444,"lev_net":28155},{"date":"2018-03-27","audusd":0.768,"am_net":-19075,"lev_net":19389},{"date":"2018-04-03","audusd":0.7685,"am_net":-22881,"lev_net":11627},{"date":"2018-04-10","audusd":0.7766,"am_net":-23281,"lev_net":9495},{"date":"2018-04-17","audusd":0.777,"am_net":-20378,"lev_net":437},{"date":"2018-04-24","audusd":0.7602,"am_net":-24210,"lev_net":11039},{"date":"2018-05-01","audusd":0.7487,"am_net":-40922,"lev_net":18740},{"date":"2018-05-08","audusd":0.7446,"am_net":-46653,"lev_net":6420},{"date":"2018-05-15","audusd":0.7467,"am_net":-49038,"lev_net":-97},{"date":"2018-05-22","audusd":0.7578,"am_net":-33906,"lev_net":-16865},{"date":"2018-05-29","audusd":0.75,"am_net":-39992,"lev_net":-15412},{"date":"2018-06-05","audusd":0.7619,"am_net":-36852,"lev_net":-16949},{"date":"2018-06-12","audusd":0.7573,"am_net":-29664,"lev_net":-17638},{"date":"2018-06-19","audusd":0.738,"am_net":-36971,"lev_net":-19674},{"date":"2018-06-26","audusd":0.7391,"am_net":-36069,"lev_net":-20694},{"date":"2018-07-03","audusd":0.7385,"am_net":-36925,"lev_net":-18929},{"date":"2018-07-10","audusd":0.7426,"am_net":-34280,"lev_net":-21325},{"date":"2018-07-17","audusd":0.7382,"am_net":-34123,"lev_net":-20570},{"date":"2018-07-24","audusd":0.7423,"am_net":-36355,"lev_net":-22150},{"date":"2018-07-31","audusd":0.7412,"am_net":-36183,"lev_net":-26118},{"date":"2018-08-07","audusd":0.7418,"am_net":-33963,"lev_net":-30617},{"date":"2018-08-14","audusd":0.724,"am_net":-34662,"lev_net":-32177},{"date":"2018-08-21","audusd":0.7359,"am_net":-32854,"lev_net":-32535},{"date":"2018-08-28","audusd":0.7337,"am_net":-29087,"lev_net":-28987},{"date":"2018-09-04","audusd":0.7179,"am_net":-33934,"lev_net":-27089},{"date":"2018-09-11","audusd":0.7118,"am_net":-42723,"lev_net":-16645},{"date":"2018-09-18","audusd":0.7228,"am_net":-50160,"lev_net":-17363},{"date":"2018-09-25","audusd":0.7248,"am_net":-49272,"lev_net":-23801},{"date":"2018-10-02","audusd":0.7187,"am_net":-48052,"lev_net":-27349},{"date":"2018-10-09","audusd":0.7106,"am_net":-49696,"lev_net":-30624},{"date":"2018-10-16","audusd":0.714,"am_net":-47085,"lev_net":-27973},{"date":"2018-10-23","audusd":0.7081,"am_net":-45098,"lev_net":-29716},{"date":"2018-10-30","audusd":0.7098,"am_net":-44188,"lev_net":-24604},{"date":"2018-11-06","audusd":0.7234,"am_net":-36791,"lev_net":-22559},{"date":"2018-11-13","audusd":0.7219,"am_net":-33497,"lev_net":-21933},{"date":"2018-11-20","audusd":0.7203,"am_net":-26284,"lev_net":-23057},{"date":"2018-11-27","audusd":0.7223,"am_net":-24881,"lev_net":-20517},{"date":"2018-12-04","audusd":0.7337,"am_net":-15078,"lev_net":-25383},{"date":"2018-12-11","audusd":0.7201,"am_net":-19264,"lev_net":-13786},{"date":"2018-12-18","audusd":0.7182,"am_net":-18608,"lev_net":-2139},{"date":"2018-12-24","audusd":0.705,"am_net":-25670,"lev_net":660},{"date":"2018-12-31","audusd":0.7048,"am_net":-25149,"lev_net":3203},{"date":"2019-01-08","audusd":0.7137,"am_net":-18908,"lev_net":-11509},{"date":"2019-01-15","audusd":0.72,"am_net":-13412,"lev_net":-18329},{"date":"2019-01-22","audusd":0.7123,"am_net":-14258,"lev_net":-14641},{"date":"2019-01-29","audusd":0.7151,"am_net":-14487,"lev_net":-12632},{"date":"2019-02-05","audusd":0.7235,"am_net":-8773,"lev_net":-15043},{"date":"2019-02-12","audusd":0.7094,"am_net":-17622,"lev_net":-6110},{"date":"2019-02-19","audusd":0.7161,"am_net":-23401,"lev_net":-9198},{"date":"2019-02-26","audusd":0.7192,"am_net":-18148,"lev_net":-12958},{"date":"2019-03-05","audusd":0.7076,"am_net":-30201,"lev_net":-9736},{"date":"2019-03-12","audusd":0.7077,"am_net":-35822,"lev_net":-10853},{"date":"2019-03-19","audusd":0.7089,"am_net":-34694,"lev_net":-18087},{"date":"2019-03-26","audusd":0.7137,"am_net":-32443,"lev_net":-18272},{"date":"2019-04-02","audusd":0.7058,"am_net":-40532,"lev_net":-12651},{"date":"2019-04-09","audusd":0.7124,"am_net":-37619,"lev_net":-13179},{"date":"2019-04-16","audusd":0.7162,"am_net":-31838,"lev_net":-8034},{"date":"2019-04-23","audusd":0.7095,"am_net":-35801,"lev_net":-3211},{"date":"2019-04-30","audusd":0.7041,"am_net":-44461,"lev_net":-7421},{"date":"2019-05-07","audusd":0.7011,"am_net":-44359,"lev_net":-8369},{"date":"2019-05-14","audusd":0.6942,"am_net":-44434,"lev_net":-13075},{"date":"2019-05-21","audusd":0.6884,"am_net":-51075,"lev_net":-10251},{"date":"2019-05-28","audusd":0.6922,"am_net":-54558,"lev_net":-10243},{"date":"2019-06-04","audusd":0.699,"am_net":-51005,"lev_net":-5575},{"date":"2019-06-11","audusd":0.696,"am_net":-44211,"lev_net":-10599},{"date":"2019-06-18","audusd":0.6876,"am_net":-50391,"lev_net":-6839},{"date":"2019-06-25","audusd":0.6957,"am_net":-42371,"lev_net":-14624},{"date":"2019-07-02","audusd":0.6993,"am_net":-25075,"lev_net":-17680},{"date":"2019-07-09","audusd":0.6928,"am_net":-27916,"lev_net":-11355},{"date":"2019-07-16","audusd":0.7012,"am_net":-24471,"lev_net":-16258},{"date":"2019-07-23","audusd":0.7002,"am_net":-22166,"lev_net":-17847},{"date":"2019-07-30","audusd":0.6875,"am_net":-39369,"lev_net":-10237},{"date":"2019-08-06","audusd":0.6763,"am_net":-45085,"lev_net":-15316},{"date":"2019-08-13","audusd":0.6795,"am_net":-43256,"lev_net":-25402},{"date":"2019-08-20","audusd":0.6777,"am_net":-41457,"lev_net":-26197},{"date":"2019-08-27","audusd":0.6752,"am_net":-42482,"lev_net":-24181},{"date":"2019-09-03","audusd":0.676,"am_net":-41072,"lev_net":-27209},{"date":"2019-09-10","audusd":0.6861,"am_net":-32689,"lev_net":-30032},{"date":"2019-09-17","audusd":0.6865,"am_net":-30802,"lev_net":-18443},{"date":"2019-09-24","audusd":0.6801,"am_net":-45813,"lev_net":-15194},{"date":"2019-10-01","audusd":0.6703,"am_net":-54819,"lev_net":-10730},{"date":"2019-10-08","audusd":0.6728,"am_net":-50035,"lev_net":-15444},{"date":"2019-10-15","audusd":0.6746,"am_net":-54057,"lev_net":-10124},{"date":"2019-10-22","audusd":0.6858,"am_net":-46346,"lev_net":-14821},{"date":"2019-10-29","audusd":0.6858,"am_net":-45268,"lev_net":-13660},{"date":"2019-11-05","audusd":0.6892,"am_net":-36763,"lev_net":-1782},{"date":"2019-11-12","audusd":0.6838,"am_net":-45339,"lev_net":-6834},{"date":"2019-11-19","audusd":0.6824,"am_net":-53368,"lev_net":-6064},{"date":"2019-11-26","audusd":0.6784,"am_net":-60893,"lev_net":91},{"date":"2019-12-03","audusd":0.6848,"am_net":-61679,"lev_net":3948},{"date":"2019-12-10","audusd":0.6808,"am_net":-55329,"lev_net":2024},{"date":"2019-12-17","audusd":0.6847,"am_net":-44081,"lev_net":-11583},{"date":"2019-12-24","audusd":0.6918,"am_net":-32982,"lev_net":-18979},{"date":"2019-12-31","audusd":0.7015,"am_net":-11739,"lev_net":-33974},{"date":"2020-01-07","audusd":0.6867,"am_net":-6260,"lev_net":-22937},{"date":"2020-01-14","audusd":0.6898,"am_net":-14944,"lev_net":-3400},{"date":"2020-01-21","audusd":0.6842,"am_net":-21370,"lev_net":3660},{"date":"2020-01-28","audusd":0.6759,"am_net":-43239,"lev_net":14328},{"date":"2020-02-04","audusd":0.674,"am_net":-58014,"lev_net":6031},{"date":"2020-02-11","audusd":0.6715,"am_net":-58084,"lev_net":12403},{"date":"2020-02-18","audusd":0.6686,"am_net":-63069,"lev_net":9866},{"date":"2020-02-25","audusd":0.6599,"am_net":-79581,"lev_net":17323},{"date":"2020-03-03","audusd":0.6583,"am_net":-84142,"lev_net":7784},{"date":"2020-03-10","audusd":0.6506,"am_net":-75451,"lev_net":-806},{"date":"2020-03-17","audusd":0.5986,"am_net":-54947,"lev_net":54},{"date":"2020-03-24","audusd":0.5977,"am_net":-38435,"lev_net":-7890},{"date":"2020-03-31","audusd":0.6112,"am_net":-28813,"lev_net":-12162},{"date":"2020-04-07","audusd":0.6164,"am_net":-26590,"lev_net":-11359},{"date":"2020-04-14","audusd":0.6437,"am_net":-19941,"lev_net":-16192},{"date":"2020-04-21","audusd":0.628,"am_net":-17420,"lev_net":-15386},{"date":"2020-04-28","audusd":0.6492,"am_net":-18500,"lev_net":-16438},{"date":"2020-05-05","audusd":0.6457,"am_net":-18493,"lev_net":-13464},{"date":"2020-05-12","audusd":0.6477,"am_net":-18946,"lev_net":-14170},{"date":"2020-05-19","audusd":0.6535,"am_net":-22527,"lev_net":-12252},{"date":"2020-05-26","audusd":0.6648,"am_net":-18812,"lev_net":-14272},{"date":"2020-06-02","audusd":0.6891,"am_net":-6656,"lev_net":-21275},{"date":"2020-06-09","audusd":0.6958,"am_net":-4303,"lev_net":-18912},{"date":"2020-06-16","audusd":0.6885,"am_net":-2596,"lev_net":10130},{"date":"2020-06-23","audusd":0.6929,"am_net":-702,"lev_net":12742},{"date":"2020-06-30","audusd":0.69,"am_net":2235,"lev_net":15890},{"date":"2020-07-07","audusd":0.6945,"am_net":2587,"lev_net":17658},{"date":"2020-07-14","audusd":0.6986,"am_net":-117,"lev_net":24418},{"date":"2020-07-21","audusd":0.7135,"am_net":-876,"lev_net":22665},{"date":"2020-07-28","audusd":0.7156,"am_net":586,"lev_net":19287},{"date":"2020-08-04","audusd":0.7159,"am_net":4856,"lev_net":16581},{"date":"2020-08-11","audusd":0.7148,"am_net":7461,"lev_net":13966},{"date":"2020-08-18","audusd":0.7246,"am_net":6675,"lev_net":14020},{"date":"2020-08-25","audusd":0.7191,"am_net":12099,"lev_net":11560},{"date":"2020-09-01","audusd":0.7373,"am_net":13674,"lev_net":10354},{"date":"2020-09-08","audusd":0.7204,"am_net":12086,"lev_net":10884},{"date":"2020-09-15","audusd":0.7298,"am_net":10535,"lev_net":28564},{"date":"2020-09-22","audusd":0.7167,"am_net":5950,"lev_net":31999},{"date":"2020-09-29","audusd":0.7128,"am_net":2409,"lev_net":28666},{"date":"2020-10-06","audusd":0.71,"am_net":4048,"lev_net":32449},{"date":"2020-10-13","audusd":0.7157,"am_net":12244,"lev_net":22315},{"date":"2020-10-20","audusd":0.7047,"am_net":7299,"lev_net":28081},{"date":"2020-10-27","audusd":0.7123,"am_net":468,"lev_net":30844},{"date":"2020-11-03","audusd":0.7162,"am_net":-4739,"lev_net":28107},{"date":"2020-11-10","audusd":0.7281,"am_net":-691,"lev_net":19367},{"date":"2020-11-17","audusd":0.7299,"am_net":-4201,"lev_net":23595},{"date":"2020-11-24","audusd":0.7359,"am_net":326,"lev_net":22437},{"date":"2020-12-01","audusd":0.7368,"am_net":-3002,"lev_net":19305},{"date":"2020-12-08","audusd":0.741,"am_net":-2468,"lev_net":19155},{"date":"2020-12-15","audusd":0.7557,"am_net":-987,"lev_net":17247},{"date":"2020-12-21","audusd":0.7582,"am_net":6850,"lev_net":16694},{"date":"2020-12-29","audusd":0.7602,"am_net":7787,"lev_net":14389},{"date":"2021-01-05","audusd":0.7758,"am_net":9412,"lev_net":15080},{"date":"2021-01-12","audusd":0.7772,"am_net":9566,"lev_net":25419},{"date":"2021-01-19","audusd":0.7692,"am_net":5455,"lev_net":25766},{"date":"2021-01-26","audusd":0.774,"am_net":4096,"lev_net":23120},{"date":"2021-02-02","audusd":0.7606,"am_net":2108,"lev_net":24993},{"date":"2021-02-09","audusd":0.7738,"am_net":-527,"lev_net":25827},{"date":"2021-02-16","audusd":0.7757,"am_net":702,"lev_net":23041},{"date":"2021-02-23","audusd":0.791,"am_net":8778,"lev_net":16813},{"date":"2021-03-02","audusd":0.7818,"am_net":10375,"lev_net":23371},{"date":"2021-03-09","audusd":0.7711,"am_net":1309,"lev_net":26784},{"date":"2021-03-16","audusd":0.7742,"am_net":3341,"lev_net":22410},{"date":"2021-03-23","audusd":0.763,"am_net":-1160,"lev_net":21117},{"date":"2021-03-30","audusd":0.7595,"am_net":-1358,"lev_net":28142},{"date":"2021-04-06","audusd":0.7661,"am_net":-4879,"lev_net":23422},{"date":"2021-04-13","audusd":0.7641,"am_net":-5643,"lev_net":24851},{"date":"2021-04-20","audusd":0.7724,"am_net":-3154,"lev_net":21607},{"date":"2021-04-27","audusd":0.7768,"am_net":4020,"lev_net":16493},{"date":"2021-05-04","audusd":0.7711,"am_net":3195,"lev_net":19555},{"date":"2021-05-11","audusd":0.7842,"am_net":7351,"lev_net":17133},{"date":"2021-05-18","audusd":0.7791,"am_net":3539,"lev_net":22014},{"date":"2021-05-25","audusd":0.7752,"am_net":1526,"lev_net":20169},{"date":"2021-06-01","audusd":0.7751,"am_net":-4013,"lev_net":23791},{"date":"2021-06-08","audusd":0.7738,"am_net":-6221,"lev_net":20626},{"date":"2021-06-15","audusd":0.7687,"am_net":-11885,"lev_net":17156},{"date":"2021-06-22","audusd":0.7552,"am_net":-26966,"lev_net":25397},{"date":"2021-06-29","audusd":0.7514,"am_net":-27252,"lev_net":24029},{"date":"2021-07-06","audusd":0.7494,"am_net":-35527,"lev_net":24393},{"date":"2021-07-13","audusd":0.7444,"am_net":-44187,"lev_net":25265},{"date":"2021-07-20","audusd":0.7328,"am_net":-50470,"lev_net":23892},{"date":"2021-07-27","audusd":0.7358,"am_net":-52298,"lev_net":25570},{"date":"2021-08-03","audusd":0.7393,"am_net":-55000,"lev_net":25030},{"date":"2021-08-10","audusd":0.7343,"am_net":-52601,"lev_net":17026},{"date":"2021-08-17","audusd":0.7254,"am_net":-55728,"lev_net":15224},{"date":"2021-08-24","audusd":0.7256,"am_net":-54221,"lev_net":3293},{"date":"2021-08-31","audusd":0.7313,"am_net":-43617,"lev_net":-5382},{"date":"2021-09-07","audusd":0.7383,"am_net":-38715,"lev_net":-24719},{"date":"2021-09-14","audusd":0.7318,"am_net":-43169,"lev_net":-34429},{"date":"2021-09-21","audusd":0.7231,"am_net":-52754,"lev_net":-29474},{"date":"2021-09-28","audusd":0.7238,"am_net":-46050,"lev_net":-35464},{"date":"2021-10-05","audusd":0.7287,"am_net":-50581,"lev_net":-36325},{"date":"2021-10-12","audusd":0.735,"am_net":-40348,"lev_net":-42607},{"date":"2021-10-19","audusd":0.7472,"am_net":-21683,"lev_net":-43445},{"date":"2021-10-26","audusd":0.7498,"am_net":-23715,"lev_net":-38257},{"date":"2021-11-02","audusd":0.743,"am_net":-16043,"lev_net":-41607},{"date":"2021-11-09","audusd":0.7377,"am_net":-33141,"lev_net":-24751},{"date":"2021-11-16","audusd":0.7302,"am_net":-52726,"lev_net":-15978},{"date":"2021-11-23","audusd":0.7226,"am_net":-72655,"lev_net":-10703},{"date":"2021-11-30","audusd":0.7125,"am_net":-78385,"lev_net":-23354},{"date":"2021-12-07","audusd":0.7118,"am_net":-82022,"lev_net":-16735},{"date":"2021-12-14","audusd":0.7103,"am_net":-84427,"lev_net":-12780},{"date":"2021-12-21","audusd":0.7154,"am_net":-81411,"lev_net":-16565},{"date":"2021-12-28","audusd":0.7224,"am_net":-75057,"lev_net":-20565},{"date":"2022-01-04","audusd":0.7239,"am_net":-71109,"lev_net":-26758},{"date":"2022-01-11","audusd":0.7209,"am_net":-73465,"lev_net":-26937},{"date":"2022-01-18","audusd":0.7184,"am_net":-67074,"lev_net":-28563},{"date":"2022-01-25","audusd":0.7148,"am_net":-63688,"lev_net":-25929},{"date":"2022-02-01","audusd":0.7128,"am_net":-61804,"lev_net":-27055},{"date":"2022-02-08","audusd":0.7145,"am_net":-58041,"lev_net":-34940},{"date":"2022-02-15","audusd":0.7152,"am_net":-52025,"lev_net":-32142},{"date":"2022-02-22","audusd":0.7216,"am_net":-49630,"lev_net":-32478},{"date":"2022-03-01","audusd":0.725,"am_net":-47358,"lev_net":-32582},{"date":"2022-03-08","audusd":0.7264,"am_net":-24117,"lev_net":-47274},{"date":"2022-03-15","audusd":0.7195,"am_net":-20651,"lev_net":-12749},{"date":"2022-03-22","audusd":0.7463,"am_net":-15268,"lev_net":-18157},{"date":"2022-03-29","audusd":0.7509,"am_net":-2574,"lev_net":-25878},{"date":"2022-04-05","audusd":0.7577,"am_net":22,"lev_net":-21494},{"date":"2022-04-12","audusd":0.7453,"am_net":2220,"lev_net":-16212},{"date":"2022-04-19","audusd":0.7375,"am_net":1426,"lev_net":-13441},{"date":"2022-04-26","audusd":0.7119,"am_net":-17215,"lev_net":-3617},{"date":"2022-05-03","audusd":0.7095,"am_net":-35061,"lev_net":6437},{"date":"2022-05-10","audusd":0.6937,"am_net":-36993,"lev_net":-5006},{"date":"2022-05-17","audusd":0.7028,"am_net":-41600,"lev_net":-573},{"date":"2022-05-24","audusd":0.7105,"am_net":-39514,"lev_net":-6785},{"date":"2022-05-31","audusd":0.7174,"am_net":-33397,"lev_net":-10529},{"date":"2022-06-07","audusd":0.723,"am_net":-20496,"lev_net":-18978},{"date":"2022-06-14","audusd":0.6874,"am_net":-19850,"lev_net":-18723},{"date":"2022-06-21","audusd":0.6965,"am_net":-15957,"lev_net":-15110},{"date":"2022-06-28","audusd":0.6905,"am_net":-18209,"lev_net":-14042},{"date":"2022-07-05","audusd":0.6797,"am_net":-18101,"lev_net":-16345},{"date":"2022-07-12","audusd":0.6756,"am_net":-36894,"lev_net":-8763},{"date":"2022-07-19","audusd":0.6898,"am_net":-38223,"lev_net":-9286},{"date":"2022-07-26","audusd":0.6936,"am_net":-39115,"lev_net":-11583},{"date":"2022-08-02","audusd":0.6917,"am_net":-45479,"lev_net":-15857},{"date":"2022-08-09","audusd":0.6963,"am_net":-44189,"lev_net":-13201},{"date":"2022-08-16","audusd":0.7023,"am_net":-39682,"lev_net":-17384},{"date":"2022-08-23","audusd":0.6926,"am_net":-52861,"lev_net":-11904},{"date":"2022-08-30","audusd":0.6853,"am_net":-51161,"lev_net":-12044},{"date":"2022-09-06","audusd":0.6735,"am_net":-42804,"lev_net":-13577},{"date":"2022-09-13","audusd":0.6733,"am_net":-27157,"lev_net":-21434},{"date":"2022-09-20","audusd":0.6687,"am_net":-36528,"lev_net":-7980},{"date":"2022-09-27","audusd":0.6432,"am_net":-29629,"lev_net":-10319},{"date":"2022-10-04","audusd":0.6501,"am_net":-8707,"lev_net":-15049},{"date":"2022-10-11","audusd":0.6271,"am_net":-8799,"lev_net":-19021},{"date":"2022-10-18","audusd":0.631,"am_net":-21808,"lev_net":-14659},{"date":"2022-10-25","audusd":0.6389,"am_net":-20403,"lev_net":-25602},{"date":"2022-11-01","audusd":0.6391,"am_net":-24717,"lev_net":-27235},{"date":"2022-11-08","audusd":0.6504,"am_net":-28711,"lev_net":-21682},{"date":"2022-11-15","audusd":0.6756,"am_net":-28248,"lev_net":-22259},{"date":"2022-11-22","audusd":0.6648,"am_net":-17367,"lev_net":-27548},{"date":"2022-11-29","audusd":0.6688,"am_net":-12316,"lev_net":-32359},{"date":"2022-12-06","audusd":0.6687,"am_net":-7192,"lev_net":-34980},{"date":"2022-12-13","audusd":0.6852,"am_net":-6494,"lev_net":-28722},{"date":"2022-12-20","audusd":0.6678,"am_net":-14704,"lev_net":-5286},{"date":"2022-12-27","audusd":0.6731,"am_net":-13849,"lev_net":-10063},{"date":"2023-01-03","audusd":0.6724,"am_net":-16499,"lev_net":-8467},{"date":"2023-01-10","audusd":0.6887,"am_net":-11622,"lev_net":-9440},{"date":"2023-01-17","audusd":0.6987,"am_net":-9245,"lev_net":-12477},{"date":"2023-01-24","audusd":0.7045,"am_net":-5780,"lev_net":-14175},{"date":"2023-01-31","audusd":0.7054,"am_net":2738,"lev_net":-20278},{"date":"2023-02-07","audusd":0.6958,"am_net":-547,"lev_net":-12246},{"date":"2023-02-14","audusd":0.6985,"am_net":-4671,"lev_net":-10381},{"date":"2023-02-21","audusd":0.6852,"am_net":-11877,"lev_net":1233},{"date":"2023-02-28","audusd":0.6728,"am_net":-19707,"lev_net":8362},{"date":"2023-03-07","audusd":0.6583,"am_net":-26640,"lev_net":13434},{"date":"2023-03-14","audusd":0.6679,"am_net":-43282,"lev_net":7086},{"date":"2023-03-21","audusd":0.6668,"am_net":-46043,"lev_net":6290},{"date":"2023-03-28","audusd":0.6705,"am_net":-42209,"lev_net":4408},{"date":"2023-04-04","audusd":0.6752,"am_net":-37544,"lev_net":5366},{"date":"2023-04-11","audusd":0.6652,"am_net":-38294,"lev_net":-1996},{"date":"2023-04-18","audusd":0.6727,"am_net":-37942,"lev_net":-4088},{"date":"2023-04-25","audusd":0.6627,"am_net":-47718,"lev_net":3447},{"date":"2023-05-02","audusd":0.6662,"am_net":-59336,"lev_net":8751},{"date":"2023-05-09","audusd":0.676,"am_net":-47054,"lev_net":-6087},{"date":"2023-05-16","audusd":0.6656,"am_net":-48272,"lev_net":-2114},{"date":"2023-05-23","audusd":0.661,"am_net":-61510,"lev_net":5114},{"date":"2023-05-30","audusd":0.6516,"am_net":-75956,"lev_net":14485},{"date":"2023-06-06","audusd":0.6668,"am_net":-78474,"lev_net":9741},{"date":"2023-06-13","audusd":0.6764,"am_net":-45238,"lev_net":-12668},{"date":"2023-06-20","audusd":0.6784,"am_net":-30811,"lev_net":-11031},{"date":"2023-06-27","audusd":0.6685,"am_net":-35695,"lev_net":392},{"date":"2023-07-03","audusd":0.667,"am_net":-55305,"lev_net":9894},{"date":"2023-07-11","audusd":0.6685,"am_net":-57212,"lev_net":3916},{"date":"2023-07-18","audusd":0.681,"am_net":-45928,"lev_net":-8203},{"date":"2023-07-25","audusd":0.679,"am_net":-40782,"lev_net":-7358},{"date":"2023-08-01","audusd":0.6622,"am_net":-49456,"lev_net":853},{"date":"2023-08-08","audusd":0.654,"am_net":-71987,"lev_net":19338},{"date":"2023-08-15","audusd":0.6455,"am_net":-85042,"lev_net":19317},{"date":"2023-08-22","audusd":0.6422,"am_net":-92691,"lev_net":18999},{"date":"2023-08-29","audusd":0.6478,"am_net":-95019,"lev_net":12073},{"date":"2023-09-05","audusd":0.6376,"am_net":-96478,"lev_net":1577},{"date":"2023-09-12","audusd":0.6424,"am_net":-97560,"lev_net":3343},{"date":"2023-09-19","audusd":0.6454,"am_net":-104859,"lev_net":-11256},{"date":"2023-09-26","audusd":0.6396,"am_net":-96688,"lev_net":-9072},{"date":"2023-10-03","audusd":0.6302,"am_net":-82065,"lev_net":-13881},{"date":"2023-10-10","audusd":0.6428,"am_net":-73317,"lev_net":-18771},{"date":"2023-10-17","audusd":0.6366,"am_net":-80716,"lev_net":-15111},{"date":"2023-10-24","audusd":0.6356,"am_net":-78984,"lev_net":-18578},{"date":"2023-10-31","audusd":0.6337,"am_net":-75445,"lev_net":-16962},{"date":"2023-11-07","audusd":0.6435,"am_net":-67857,"lev_net":-13691},{"date":"2023-11-14","audusd":0.6506,"am_net":-83077,"lev_net":-6263},{"date":"2023-11-21","audusd":0.6554,"am_net":-88356,"lev_net":-11853},{"date":"2023-11-28","audusd":0.6649,"am_net":-80684,"lev_net":-10779},{"date":"2023-12-05","audusd":0.6552,"am_net":-71305,"lev_net":-9340},{"date":"2023-12-12","audusd":0.6559,"am_net":-74046,"lev_net":-695},{"date":"2023-12-19","audusd":0.6762,"am_net":-64063,"lev_net":1339},{"date":"2023-12-26","audusd":0.6824,"am_net":-53077,"lev_net":-12273},{"date":"2024-01-02","audusd":0.676,"am_net":-41896,"lev_net":-5786},{"date":"2024-01-09","audusd":0.6687,"am_net":-50038,"lev_net":7054},{"date":"2024-01-16","audusd":0.6584,"am_net":-65891,"lev_net":8501},{"date":"2024-01-23","audusd":0.6579,"am_net":-72255,"lev_net":5259},{"date":"2024-01-30","audusd":0.6602,"am_net":-78998,"lev_net":4902},{"date":"2024-02-06","audusd":0.6523,"am_net":-90321,"lev_net":9785},{"date":"2024-02-13","audusd":0.6452,"am_net":-95835,"lev_net":7883},{"date":"2024-02-20","audusd":0.6549,"am_net":-100861,"lev_net":10584},{"date":"2024-02-27","audusd":0.6544,"am_net":-99483,"lev_net":2623},{"date":"2024-03-05","audusd":0.6502,"am_net":-115753,"lev_net":3985},{"date":"2024-03-12","audusd":0.6605,"am_net":-101150,"lev_net":-10353},{"date":"2024-03-19","audusd":0.6531,"am_net":-101022,"lev_net":-30793},{"date":"2024-03-26","audusd":0.6533,"am_net":-99575,"lev_net":-31098},{"date":"2024-04-02","audusd":0.6519,"am_net":-103455,"lev_net":-24013},{"date":"2024-04-09","audusd":0.6627,"am_net":-89882,"lev_net":-30511},{"date":"2024-04-16","audusd":0.64,"am_net":-103199,"lev_net":-24575},{"date":"2024-04-23","audusd":0.6487,"am_net":-100816,"lev_net":-28368},{"date":"2024-04-30","audusd":0.6475,"am_net":-89208,"lev_net":-33211},{"date":"2024-05-07","audusd":0.6597,"am_net":-69802,"lev_net":-33147},{"date":"2024-05-14","audusd":0.6624,"am_net":-72979,"lev_net":-30163},{"date":"2024-05-21","audusd":0.6666,"am_net":-64169,"lev_net":-19509},{"date":"2024-05-28","audusd":0.6649,"am_net":-64553,"lev_net":-12911},{"date":"2024-06-04","audusd":0.6648,"am_net":-70657,"lev_net":-11371},{"date":"2024-06-11","audusd":0.6605,"am_net":-74127,"lev_net":-17246},{"date":"2024-06-18","audusd":0.6655,"am_net":-63337,"lev_net":-10766},{"date":"2024-06-25","audusd":0.6646,"am_net":-49197,"lev_net":-3409},{"date":"2024-07-02","audusd":0.6665,"am_net":-36267,"lev_net":1449},{"date":"2024-07-09","audusd":0.674,"am_net":-22666,"lev_net":-915},{"date":"2024-07-16","audusd":0.6732,"am_net":-21030,"lev_net":-2075},{"date":"2024-07-23","audusd":0.6616,"am_net":-33282,"lev_net":-2063},{"date":"2024-07-30","audusd":0.6537,"am_net":-53128,"lev_net":-9619},{"date":"2024-08-06","audusd":0.6518,"am_net":-54615,"lev_net":-16507},{"date":"2024-08-13","audusd":0.663,"am_net":-48121,"lev_net":-22768},{"date":"2024-08-20","audusd":0.6743,"am_net":-39945,"lev_net":-27087},{"date":"2024-08-27","audusd":0.6792,"am_net":-18140,"lev_net":-20148},{"date":"2024-09-03","audusd":0.6711,"am_net":-7665,"lev_net":-17259},{"date":"2024-09-10","audusd":0.6652,"am_net":-12037,"lev_net":-8602},{"date":"2024-09-17","audusd":0.6755,"am_net":-34143,"lev_net":-17115},{"date":"2024-09-24","audusd":0.6892,"am_net":-16903,"lev_net":-1372},{"date":"2024-10-01","audusd":0.6881,"am_net":-9791,"lev_net":16711},{"date":"2024-10-08","audusd":0.6746,"am_net":6353,"lev_net":22577},{"date":"2024-10-15","audusd":0.67,"am_net":-10104,"lev_net":12014},{"date":"2024-10-22","audusd":0.6683,"am_net":-12763,"lev_net":15877},{"date":"2024-10-29","audusd":0.6558,"am_net":-24102,"lev_net":19061},{"date":"2024-11-05","audusd":0.6636,"am_net":-15596,"lev_net":12148},{"date":"2024-11-12","audusd":0.6532,"am_net":-13041,"lev_net":-315},{"date":"2024-11-19","audusd":0.6531,"am_net":-18925,"lev_net":2913},{"date":"2024-11-26","audusd":0.6474,"am_net":-12706,"lev_net":1473},{"date":"2024-12-03","audusd":0.6485,"am_net":-21143,"lev_net":-6390},{"date":"2024-12-10","audusd":0.6375,"am_net":-34773,"lev_net":-4387},{"date":"2024-12-17","audusd":0.6336,"am_net":-61519,"lev_net":-22119},{"date":"2024-12-24","audusd":0.6236,"am_net":-58307,"lev_net":-27604},{"date":"2024-12-31","audusd":0.6187,"am_net":-56846,"lev_net":-33230},{"date":"2025-01-07","audusd":0.623,"am_net":-42846,"lev_net":-33788},{"date":"2025-01-14","audusd":0.6194,"am_net":-38358,"lev_net":-39039},{"date":"2025-01-21","audusd":0.6245,"am_net":-42546,"lev_net":-36659},{"date":"2025-01-28","audusd":0.6252,"am_net":-42405,"lev_net":-44281},{"date":"2025-02-04","audusd":0.6247,"am_net":-45557,"lev_net":-38549},{"date":"2025-02-11","audusd":0.6293,"am_net":-29067,"lev_net":-42495},{"date":"2025-02-18","audusd":0.6352,"am_net":-31084,"lev_net":-33347},{"date":"2025-02-25","audusd":0.6342,"am_net":-37289,"lev_net":-30552},{"date":"2025-03-04","audusd":0.6271,"am_net":-45370,"lev_net":-28373},{"date":"2025-03-11","audusd":0.6293,"am_net":-38382,"lev_net":-23790},{"date":"2025-03-18","audusd":0.6359,"am_net":-36615,"lev_net":-29920},{"date":"2025-03-25","audusd":0.6303,"am_net":-38132,"lev_net":-31240},{"date":"2025-04-01","audusd":0.6275,"am_net":-35437,"lev_net":-33119},{"date":"2025-04-08","audusd":0.5948,"am_net":-15614,"lev_net":-29441},{"date":"2025-04-15","audusd":0.6333,"am_net":-11953,"lev_net":-24314},{"date":"2025-04-22","audusd":0.6369,"am_net":-5022,"lev_net":-22645},{"date":"2025-04-29","audusd":0.6384,"am_net":-8385,"lev_net":-17574},{"date":"2025-05-06","audusd":0.6489,"am_net":-11945,"lev_net":-15851},{"date":"2025-05-13","audusd":0.6467,"am_net":-27495,"lev_net":-6372},{"date":"2025-05-20","audusd":0.642,"am_net":-34435,"lev_net":-6684},{"date":"2025-05-27","audusd":0.6443,"am_net":-31657,"lev_net":-15956},{"date":"2025-06-03","audusd":0.6463,"am_net":-31996,"lev_net":-19155},{"date":"2025-06-10","audusd":0.6519,"am_net":-33460,"lev_net":-22309},{"date":"2025-06-17","audusd":0.6474,"am_net":-32070,"lev_net":-15300},{"date":"2025-06-24","audusd":0.6486,"am_net":-36950,"lev_net":-22303},{"date":"2025-07-01","audusd":0.658,"am_net":-35159,"lev_net":-24288},{"date":"2025-07-08","audusd":0.653,"am_net":-38246,"lev_net":-17450},{"date":"2025-07-15","audusd":0.6512,"am_net":-38483,"lev_net":-17608},{"date":"2025-07-22","audusd":0.6554,"am_net":-53883,"lev_net":-12185},{"date":"2025-07-29","audusd":0.6509,"am_net":-49481,"lev_net":-11386},{"date":"2025-08-05","audusd":0.647,"am_net":-61482,"lev_net":-10464},{"date":"2025-08-12","audusd":0.6526,"am_net":-67593,"lev_net":-9698},{"date":"2025-08-19","audusd":0.6453,"am_net":-73775,"lev_net":-4819},{"date":"2025-08-26","audusd":0.6492,"am_net":-79151,"lev_net":-4483},{"date":"2025-09-02","audusd":0.6519,"am_net":-66140,"lev_net":-10353},{"date":"2025-09-09","audusd":0.6582,"am_net":-68461,"lev_net":-4754},{"date":"2025-09-16","audusd":0.6683,"am_net":-40442,"lev_net":-3081},{"date":"2025-09-23","audusd":0.6598,"am_net":-48799,"lev_net":-5546},{"date":"2025-09-30","audusd":0.6611,"am_net":-51595,"lev_net":-11646},{"date":"2025-10-07","audusd":0.6579,"am_net":-53176,"lev_net":-3037},{"date":"2025-10-14","audusd":0.6485,"am_net":-60136,"lev_net":5423},{"date":"2025-10-21","audusd":0.6487,"am_net":-65252,"lev_net":346},{"date":"2025-10-28","audusd":0.6582,"am_net":-60254,"lev_net":-12434},{"date":"2025-11-04","audusd":0.6489,"am_net":-60691,"lev_net":-7488},{"date":"2025-11-10","audusd":0.6535,"am_net":-62515,"lev_net":-15531},{"date":"2025-11-18","audusd":0.6506,"am_net":-60110,"lev_net":-12427},{"date":"2025-11-25","audusd":0.6467,"am_net":-69054,"lev_net":-17558},{"date":"2025-12-02","audusd":0.6562,"am_net":-68078,"lev_net":-17669},{"date":"2025-12-09","audusd":0.664,"am_net":-61986,"lev_net":18563},{"date":"2025-12-16","audusd":0.663,"am_net":-40863,"lev_net":39477},{"date":"2025-12-23","audusd":0.67,"am_net":-40339,"lev_net":41482},{"date":"2025-12-30","audusd":0.6694,"am_net":-32752,"lev_net":33671},{"date":"2026-01-06","audusd":0.6736,"am_net":-31316,"lev_net":35115},{"date":"2026-01-13","audusd":0.668,"am_net":-33486,"lev_net":30217},{"date":"2026-01-20","audusd":0.6735,"am_net":-31599,"lev_net":27558},{"date":"2026-01-27","audusd":0.7011,"am_net":-19349,"lev_net":44726},{"date":"2026-02-03","audusd":0.7022,"am_net":-18802,"lev_net":59409},{"date":"2026-02-10","audusd":0.7074,"am_net":-13915,"lev_net":64904},{"date":"2026-02-17","audusd":0.7084,"am_net":1761,"lev_net":70260},{"date":"2026-02-24","audusd":0.7055,"am_net":10577,"lev_net":64653},{"date":"2026-03-03","audusd":0.7033,"am_net":28878,"lev_net":54635},{"date":"2026-03-10","audusd":0.7119,"am_net":23329,"lev_net":46568},{"date":"2026-03-17","audusd":0.7102,"am_net":41929,"lev_net":45359},{"date":"2026-03-24","audusd":0.6993,"am_net":43926,"lev_net":49145},{"date":"2026-03-31","audusd":0.69,"am_net":44633,"lev_net":52569},{"date":"2026-04-07","audusd":0.6975,"am_net":40747,"lev_net":45901},{"date":"2026-04-14","audusd":0.7123,"am_net":36483,"lev_net":43642},{"date":"2026-04-21","audusd":0.7151,"am_net":36508,"lev_net":48325},{"date":"2026-04-28","audusd":0.718,"am_net":45097,"lev_net":47855},{"date":"2026-05-05","audusd":0.7182,"am_net":44874,"lev_net":56600},{"date":"2026-05-12","audusd":0.7239,"am_net":47551,"lev_net":55851},{"date":"2026-05-19","audusd":0.7109,"am_net":40595,"lev_net":61178},
+{"date":"2026-05-26","audusd":0.7167,"am_net":19075,"lev_net":60234}];
+/*__DATA_END__*/
+
+/* ============================= rendering ================================== */
+const fmtDate = s => new Date(s).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});
+const fmtK = n => (n>0?'+':'') + Math.round(n/1000) + 'k';
+const $ = id => document.getElementById(id);
+
+const labels  = SERIES.map(d=>d.date);
+const audData = SERIES.map(d=>d.audusd);
+const amData  = SERIES.map(d=>d.am_net);
+const levData = SERIES.map(d=>d.lev_net);
+
+const css = k => getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+const AUD=css('--aud'), AM=css('--am'), LEV=css('--lev'), GRID=css('--grid'), DIM=css('--text-dim');
+
+/* dashed zero line on the positioning (RHS) axis */
+const zeroLine={id:'zeroLine',afterDraw(c){
+  const s=c.scales.y1; if(!s)return; const y=s.getPixelForValue(0);
+  const{left,right}=c.chartArea, ctx=c.ctx;
+  ctx.save();ctx.strokeStyle='rgba(255,255,255,.16)';ctx.setLineDash([4,4]);
+  ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();ctx.restore();
+}};
+
+const chart = new Chart($('chart'), {
+  type:'line',
+  data:{ labels,
+    datasets:[
+      {label:'AUD/USD', data:audData, yAxisID:'y', borderColor:AUD, borderWidth:1.6, pointRadius:0, tension:.2},
+      {label:'Asset Mgr net', data:amData, yAxisID:'y1', borderColor:AM, borderWidth:1.6, pointRadius:0, tension:.2},
+      {label:'Leveraged Funds net', data:levData, yAxisID:'y1', borderColor:LEV, borderWidth:1.6, pointRadius:0, tension:.2}
+    ]},
+  options:{
+    responsive:true, maintainAspectRatio:false, animation:{duration:300},
+    interaction:{mode:'index',intersect:false},
+    plugins:{
+      legend:{display:false},
+      tooltip:{
+        backgroundColor:'#0c1320', borderColor:'#22344f', borderWidth:1,
+        titleColor:'#e8eef7', bodyColor:'#cdd9ea', padding:11,
+        callbacks:{
+          title:items=>fmtDate(items[0].label),
+          label:ctx=>{
+            if(ctx.datasetIndex===0) return '  AUD/USD            '+ctx.parsed.y.toFixed(4);
+            const name = ctx.datasetIndex===1 ? 'Asset Mgr net   ' : 'Leveraged net  ';
+            return '  '+name+(ctx.parsed.y>0?'+':'')+ctx.parsed.y.toLocaleString()+' contracts';
+          }
+        }
+      }
+    },
+    scales:{
+      x:{grid:{color:GRID,drawTicks:false}, ticks:{color:DIM,maxTicksLimit:11,font:{family:'IBM Plex Mono',size:11},
+         callback:function(v){return new Date(this.getLabelForValue(v)).getFullYear();}}},
+      y:{position:'left', grid:{color:GRID}, ticks:{color:AUD,font:{family:'IBM Plex Mono',size:11},callback:v=>v.toFixed(3)}},
+      y1:{position:'right', grid:{drawOnChartArea:false}, ticks:{color:DIM,font:{family:'IBM Plex Mono',size:11},callback:v=>fmtK(v)}}
+    }
+  },
+  plugins:[zeroLine]
+});
+
+/* ----------------------------- date slider -------------------------------- */
+const N = SERIES.length-1;
+const minR=$('minR'), maxR=$('maxR'), fill=$('trackFill');
+minR.max=maxR.max=N; maxR.value=N;
+
+function applyRange(){
+  let lo=+minR.value, hi=+maxR.value;
+  if(lo>hi-2){ if(document.activeElement===minR){lo=hi-2;minR.value=lo;} else {hi=lo+2;maxR.value=hi;} }
+  chart.data.labels = labels.slice(lo,hi+1);
+  chart.data.datasets[0].data = audData.slice(lo,hi+1);
+  chart.data.datasets[1].data = amData.slice(lo,hi+1);
+  chart.data.datasets[2].data = levData.slice(lo,hi+1);
+  chart.update();
+  fill.style.left=(lo/N*100)+'%'; fill.style.right=((N-hi)/N*100)+'%';
+  $('rangeStart').textContent=fmtDate(labels[lo]);
+  $('rangeEnd').textContent=fmtDate(labels[hi]);
+  updateStats(lo,hi);
+}
+
+function statCard(arr, valEl, chgEl, asPrice){
+  const last=arr[arr.length-1], prev=arr[arr.length-2]??last, d=last-prev;
+  valEl.textContent = asPrice ? last.toFixed(4) : (last>0?'+':'')+last.toLocaleString();
+  const shown = asPrice ? Math.abs(d).toFixed(4) : Math.abs(d).toLocaleString();
+  chgEl.innerHTML=`<span class="${d>=0?'up':'down'}">${d>=0?'▲':'▼'} ${shown}</span> since prior week`;
+}
+function updateStats(lo,hi){
+  statCard(audData.slice(lo,hi+1), $('audVal'), $('audChg'), true);
+  statCard(amData.slice(lo,hi+1),  $('amVal'),  $('amChg'),  false);
+  statCard(levData.slice(lo,hi+1), $('levVal'), $('levChg'), false);
+}
+
+minR.addEventListener('input',()=>{setPreset(null);applyRange();});
+maxR.addEventListener('input',()=>{setPreset(null);applyRange();});
+function setPreset(btn){document.querySelectorAll('.preset').forEach(b=>b.classList.toggle('active',b===btn));}
+$('presets').addEventListener('click',e=>{
+  const b=e.target.closest('.preset'); if(!b)return;
+  const yrs=+b.dataset.y;
+  if(yrs===0){ minR.value=0; }
+  else{ const cutoff=Date.now()-yrs*365*864e5; let idx=labels.findIndex(d=>new Date(d).getTime()>=cutoff); minR.value=idx<0?0:idx; }
+  maxR.value=N; setPreset(b); applyRange();
+});
+
+applyRange();
+
+/* when real data is injected by build_cot_dashboard.py, IS_SAMPLE flips to false */
+if(typeof IS_SAMPLE!=='undefined' && !IS_SAMPLE){
+  const b=document.querySelector('.banner'); if(b) b.style.display='none';
+  const w=document.querySelector('.watermark'); if(w) w.style.display='none';
+  const s=document.querySelector('.source');
+  if(s) s.innerHTML='Source: CFTC TFF Futures-Only (positioning) &middot; Alpha Vantage (AUD/USD) &middot; net = long &minus; short contracts. Weekly, Tuesday close.';
+}
+</script>
+</body>
+</html>
