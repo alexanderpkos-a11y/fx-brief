@@ -780,11 +780,11 @@ CORR_CHART_HTML = """
     <span><span class="dot" style="background:#e2eaf6;width:11px;height:11px"></span>AUD/USD (RHS)</span>
     <span style="color:rgba(240,179,41,0.7);font-size:0.7rem">&plusmn;1&sigma;&thinsp;/&thinsp;2&sigma;</span>
     <span style="width:1px;height:12px;background:var(--panel-edge);margin:0 2px;display:inline-block"></span>
-    <span><span class="dot" style="background:#4b8ef0"></span>Spread</span>
-    <span><span class="dot" style="background:#e09438"></span>Iron ore</span>
-    <span><span class="dot" style="background:#2fcb9a"></span>S&amp;P</span>
-    <span><span class="dot" style="background:#c084fc"></span>USD/CNY</span>
-    <span><span class="dot" style="background:#f05a52"></span>DXY</span>
+    <span id="corr_leg_spread"   style="cursor:pointer" title="Click to hide"><span class="dot" style="background:#4b8ef0"></span>Spread</span>
+    <span id="corr_leg_iron_ore" style="cursor:pointer" title="Click to hide"><span class="dot" style="background:#e09438"></span>Iron ore</span>
+    <span id="corr_leg_spx"      style="cursor:pointer" title="Click to hide"><span class="dot" style="background:#2fcb9a"></span>S&amp;P</span>
+    <span id="corr_leg_usdcnh"   style="cursor:pointer" title="Click to hide"><span class="dot" style="background:#c084fc"></span>USD/CNY</span>
+    <span id="corr_leg_dxy"      style="cursor:pointer" title="Click to hide"><span class="dot" style="background:#f05a52"></span>DXY</span>
   </div>
   <div id="corr_toggleBtns" class="presets" style="margin-top:0">
     <button class="preset active" data-w="20">20d</button>
@@ -855,6 +855,8 @@ CORR_INIT_SCRIPT = """<script>
   var DRIVER_LABELS_MAP = {spread:'AU–US spread',iron_ore:'Iron ore',spx:'S&P 500',usdcnh:'USD/CNY',dxy:'DXY'};
   var DRIVER_SIGN   = {spread:1,iron_ore:1,spx:1,usdcnh:-1,dxy:-1};
   var DRIVERS = ['spread','iron_ore','spx','usdcnh','dxy'];
+  var DRIVER_IDX    = {spread:6,iron_ore:7,spx:8,usdcnh:9,dxy:10};
+  var hiddenDrivers = new Set();
 
   // Band datasets at fixed indices 0-5, AUD/USD at 5, correlations at 6-10
   function buildDatasets(series) {
@@ -941,6 +943,26 @@ CORR_INIT_SCRIPT = """<script>
         }
       }
     }
+  });
+
+  DRIVERS.forEach(function(name){
+    var el=document.getElementById('corr_leg_'+name);
+    if(!el) return;
+    el.addEventListener('click',function(){
+      var idx=DRIVER_IDX[name];
+      if(hiddenDrivers.has(name)){
+        hiddenDrivers.delete(name);
+        corrChart.setDatasetVisibility(idx,true);
+        el.style.opacity='1';
+        el.title='Click to hide';
+      } else {
+        hiddenDrivers.add(name);
+        corrChart.setDatasetVisibility(idx,false);
+        el.style.opacity='0.3';
+        el.title='Click to show';
+      }
+      corrChart.update();
+    });
   });
 
   function fmtDate(d){
