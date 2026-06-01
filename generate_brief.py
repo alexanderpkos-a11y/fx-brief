@@ -332,6 +332,46 @@ def _to_returns_df(aud_hist, driver_hists):
         np.array(X_rows, dtype=float),
     )
 
+def _to_daily_returns_df(aud_hist, driver_hists, spread_lag=1):
+    """Daily-frequency return data for the 1M short-window OLS.
+    X columns: intercept, spread, spx, usdcnh, iron. DXY excluded."""
+    spread_hist = driver_hists.get('spread', {})
+    spx_hist    = driver_hists.get('spx', {})
+    usdcnh_hist = driver_hists.get('usdcnh', {})
+    iron_hist   = driver_hists.get('iron_ore', {})
+
+    aud_r    = dict(_log_returns(aud_hist))
+    spx_r    = dict(_log_returns(spx_hist))
+    usdcnh_r = dict(_log_returns(usdcnh_hist))
+    iron_r   = dict(_log_returns(iron_hist))
+    spread_d = dict(_first_diffs(spread_hist))
+
+    all_dates    = sorted(set(aud_r) & set(spx_r) & set(usdcnh_r))
+    spread_dates = sorted(spread_d)
+    spread_lagged = {}
+    for i, d in enumerate(spread_dates):
+        if spread_lag == 0:
+            spread_lagged[d] = spread_d[d]
+        elif i >= spread_lag:
+            spread_lagged[d] = spread_d[spread_dates[i - spread_lag]]
+
+    dates_out, y_out, X_rows = [], [], []
+    for d in all_dates:
+        y  = aud_r.get(d)
+        xs = spread_lagged.get(d)
+        xp = spx_r.get(d)
+        xc = usdcnh_r.get(d)
+        xi = iron_r.get(d)
+        if y is None or xp is None or xc is None:
+            continue
+        dates_out.append(d)
+        y_out.append(y)
+        X_rows.append([1.0,
+                        xs if xs is not None else float('nan'),
+                        xp, xc,
+                        xi if xi is not None else float('nan')])
+    return (dates_out, np.array(y_out, dtype=float), np.array(X_rows, dtype=float))
+
 def _rolling_ols_betas(y_arr, X_arr, window=252, min_obs_frac=0.75):
     """Rolling OLS via np.linalg.lstsq. Returns (betas, r2) both shape (n, k) / (n,).
     Rows where window has fewer than min_obs finite pairs are NaN."""
@@ -665,6 +705,20 @@ _beta_series_252 = _add_beta_bands(_beta_dates, _betas_drv_252, _r2_252, _BETA_D
 _beta_series_60  = _add_beta_bands(_beta_dates, _betas_drv_60,  _r2_60,  _BETA_DRIVERS, sample_every=1, band_window=52)
 print(f'  Beta series: {len(_beta_series_252)} records (2Y)  |  {len(_beta_series_60)} (1Y)')
 
+# 1M daily OLS (21 trading days) — separate daily series for short-window regime column
+print('Computing 1M daily OLS betas…')
+_beta_dates_d, _beta_y_d, _beta_X_d = _to_daily_returns_df(
+    _hist_results.get('audusd', {}), _driver_hists)
+_col_finite_d = [np.any(np.isfinite(_beta_X_d[:, j])) for j in range(_beta_X_d.shape[1])]
+_active_col_names_d = [n for n, ok in zip(_BETA_COL_NAMES, _col_finite_d) if ok]
+_beta_X_d_active = _beta_X_d[:, _col_finite_d]
+_betas_1m_raw, _r2_1m = _rolling_ols_betas(_beta_y_d, _beta_X_d_active, window=21)
+_betas_1m     = _expand_betas(_betas_1m_raw, _active_col_names_d, _BETA_COL_NAMES)
+_betas_drv_1m = _betas_1m[:, 1:]
+_beta_series_1m = _add_beta_bands(_beta_dates_d, _betas_drv_1m, _r2_1m, _BETA_DRIVERS,
+                                   sample_every=5, band_window=252)
+print(f'  1M daily: {int(np.isfinite(_r2_1m).sum())} valid rows')
+
 # Latest betas (most recent row with at least one non-NaN driver) — used by sensitivity panel
 def _latest_valid(series_list, names):
     for rec in reversed(series_list):
@@ -674,6 +728,7 @@ def _latest_valid(series_list, names):
 
 _latest_252 = _latest_valid(_beta_series_252, _BETA_DRIVERS)
 _latest_60  = _latest_valid(_beta_series_60,  _BETA_DRIVERS)
+_latest_1m  = _latest_valid(_beta_series_1m,  _BETA_DRIVERS)
 
 def _build_latest_betas(rec, names):
     if rec is None:
@@ -692,9 +747,11 @@ def _build_latest_betas(rec, names):
 
 _latest_betas_252 = _build_latest_betas(_latest_252, _BETA_DRIVERS)
 _latest_betas_60  = _build_latest_betas(_latest_60,  _BETA_DRIVERS)
+_latest_betas_1m  = _build_latest_betas(_latest_1m,  _BETA_DRIVERS)
 
 _lb252j = json.dumps(_latest_betas_252, separators=(',', ':'))
 _lb60j  = json.dumps(_latest_betas_60,  separators=(',', ':'))
+_lb1mj  = json.dumps(_latest_betas_1m,  separators=(',', ':'))
 
 # Today's move attribution: actual driver returns × 252d rolling betas
 _last_aud_lr = float(_beta_y[-1]) if len(_beta_y) else 0.0
@@ -727,8 +784,9 @@ _attribj = json.dumps(today_attribution, separators=(',', ':'))
 
 beta_data_script = (
     f'<script>\n'
-    f'var LATEST_BETAS_252={_lb252j};\n'
+    f'var LATEST_BETAS_1M={_lb1mj};\n'
     f'var LATEST_BETAS_60={_lb60j};\n'
+    f'var LATEST_BETAS_252={_lb252j};\n'
     f'var TODAY_ATTRIBUTION={_attribj};\n'
     f'</script>'
 )
@@ -1318,14 +1376,7 @@ CORR_INIT_SCRIPT = """<script>
 # DRIVER ATTRIBUTION PANEL  (replaces slider-based beta sensitivity panel)
 # ---------------------------------------------------------------------------
 DRIVER_PANEL_HTML = """
-<!-- Toggle row -->
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-  <div style="font-size:0.68rem;color:var(--text-faint)">Rolling OLS &nbsp;&middot;&nbsp; what moved AUD/USD and what drives it now</div>
-  <div id="dp_toggleBtns" class="presets" style="margin-top:0">
-    <button class="preset active" data-w="104">2Y</button>
-    <button class="preset" data-w="52">1Y</button>
-  </div>
-</div>
+<div style="font-size:0.68rem;color:var(--text-faint);margin-bottom:10px">Rolling OLS &nbsp;&middot;&nbsp; what moved AUD/USD and what drives it now</div>
 
 <!-- Card 1: Today's move -->
 <div class="panel-box" style="padding:14px 18px 12px;margin-bottom:10px">
@@ -1369,15 +1420,28 @@ DRIVER_PANEL_HTML = """
   </div>
 </div>
 
-<!-- Card 2: Current regime -->
+<!-- Card 2: Current regime — three windows side by side -->
 <div class="panel-box" style="padding:14px 18px 12px">
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;flex-wrap:wrap;gap:4px">
-    <div style="font-size:0.65rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint)">Current regime &nbsp;<span id="dp_window_lbl">252d OLS</span></div>
-    <div style="font-size:0.65rem;color:var(--text-faint)">R&sup2;&nbsp;=&nbsp;<span id="dp_r2" style="color:var(--text)">—</span></div>
+  <div style="font-size:0.65rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint);margin-bottom:10px">Current regime &nbsp;&middot;&nbsp; sensitivity ranked by |&beta;|</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+    <div>
+      <div style="font-size:0.58rem;letter-spacing:.1em;text-transform:uppercase;color:#4b8ef0;padding-bottom:5px;border-bottom:1px solid var(--panel-edge);margin-bottom:7px">1M &middot; daily</div>
+      <div id="dp_regime_1m"></div>
+      <div style="font-size:0.6rem;color:var(--text-faint);margin-top:6px">R&sup2;&nbsp;=&nbsp;<span id="dp_r2_1m">—</span></div>
+    </div>
+    <div>
+      <div style="font-size:0.58rem;letter-spacing:.1em;text-transform:uppercase;color:#2fcb9a;padding-bottom:5px;border-bottom:1px solid var(--panel-edge);margin-bottom:7px">1Y &middot; weekly</div>
+      <div id="dp_regime_1y"></div>
+      <div style="font-size:0.6rem;color:var(--text-faint);margin-top:6px">R&sup2;&nbsp;=&nbsp;<span id="dp_r2_1y">—</span></div>
+    </div>
+    <div>
+      <div style="font-size:0.58rem;letter-spacing:.1em;text-transform:uppercase;color:#f0b329;padding-bottom:5px;border-bottom:1px solid var(--panel-edge);margin-bottom:7px">2Y &middot; weekly</div>
+      <div id="dp_regime_2y"></div>
+      <div style="font-size:0.6rem;color:var(--text-faint);margin-top:6px">R&sup2;&nbsp;=&nbsp;<span id="dp_r2_2y">—</span></div>
+    </div>
   </div>
-  <div id="dp_regime_rows" style="display:flex;flex-direction:column;gap:6px"></div>
   <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--panel-edge);font-size:0.68rem;color:var(--text-faint)">
-    Dominant driver: <b id="dp_dominant" style="color:var(--gold)">—</b>
+    Dominant driver (2Y): <b id="dp_dominant" style="color:var(--gold)">—</b>
   </div>
 </div>
 
@@ -1411,8 +1475,6 @@ DRIVER_INIT_SCRIPT = """<script>
   var DRIVER_LABEL = {spread:'AU–US Spread',spx:'S&P 500',usdcnh:'USD/CNY',iron:'Iron ore'};
   var DRIVER_COLOR = {spread:'#4b8ef0',spx:'#2fcb9a',usdcnh:'#c084fc',iron:'#e09438'};
   var DRIVER_SIGN  = {spread:1,spx:1,usdcnh:-1,iron:1};
-  var activeLatest = LATEST_BETAS_252;
-
   /* ── TODAY'S MOVE ── */
   function renderToday() {
     var a = TODAY_ATTRIBUTION; if (!a) return;
@@ -1485,61 +1547,60 @@ DRIVER_INIT_SCRIPT = """<script>
     return '';
   }
 
-  function renderRegime(latest) {
+  function renderRegime(latest, containerId, r2Id) {
     if (!latest) return;
-    var r2El = document.getElementById('dp_r2');
-    if (r2El) r2El.textContent = latest.r2 !== null ? latest.r2.toFixed(3) : '—';
-    var wEl = document.getElementById('dp_window_lbl');
-    if (wEl) wEl.textContent = (activeLatest === LATEST_BETAS_252 ? '2Y' : '1Y') + ' OLS';
+    var r2El = document.getElementById(r2Id);
+    if (r2El) r2El.textContent = (latest.r2 !== null && latest.r2 !== undefined) ? latest.r2.toFixed(3) : '—';
 
-    // sort by |beta| descending
     var ranked = DRIVERS.slice().sort(function(a, b) {
       var ba = latest[a] && latest[a].beta !== null ? Math.abs(latest[a].beta) : -1;
       var bb = latest[b] && latest[b].beta !== null ? Math.abs(latest[b].beta) : -1;
       return bb - ba;
     });
 
-    var container = document.getElementById('dp_regime_rows');
+    var container = document.getElementById(containerId);
     if (!container) return;
     var html = '';
     ranked.forEach(function(name, idx) {
       var d = latest[name];
-      var betaTxt = (!d || d.beta === null) ? 'n/a' : (d.beta >= 0 ? '+' : '') + d.beta.toFixed(4);
-      var badge   = (!d || d.beta === null) ? '<span class="dp-badge" style="color:var(--text-faint)">no data</span>' : betaBadge(name, d);
-      html += '<div class="dp-regime-row">'
-        + '<div class="dp-regime-rank">' + (idx + 1) + '</div>'
-        + '<div class="dp-regime-name"><span class="dot" style="background:' + DRIVER_COLOR[name] + '"></span>' + DRIVER_LABEL[name] + '</div>'
-        + '<div class="dp-regime-beta">β ' + betaTxt + '</div>'
-        + '<div>' + badge + '</div>'
+      var betaTxt = (!d || d.beta === null || d.beta === undefined) ? 'n/a'
+        : (d.beta >= 0 ? '+' : '') + d.beta.toFixed(3);
+      var badge = (!d || d.beta === null || d.beta === undefined) ? '' : betaBadge(name, d);
+      html += '<div style="display:grid;grid-template-columns:14px 1fr auto;align-items:center;gap:4px;margin-bottom:4px">'
+        + '<span style="color:var(--text-faint);font-size:0.57rem;text-align:center">' + (idx + 1) + '</span>'
+        + '<span style="display:flex;align-items:center;gap:4px;font-size:0.7rem;color:var(--text-dim)">'
+        + '<span class="dot" style="background:' + DRIVER_COLOR[name] + ';width:7px;height:7px;flex-shrink:0"></span>'
+        + DRIVER_LABEL[name] + '</span>'
+        + '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:0.67rem;color:var(--text);text-align:right;white-space:nowrap">β ' + betaTxt + '</span>'
         + '</div>';
+      if (badge) html += '<div style="margin-bottom:3px;padding-left:18px">' + badge + '</div>';
     });
     container.innerHTML = html;
+  }
 
+  /* ── DOMINANT DRIVER (2Y betas) ── */
+  function setDominant() {
+    var ranked = DRIVERS.slice().sort(function(a, b) {
+      var ba = LATEST_BETAS_252[a] && LATEST_BETAS_252[a].beta !== null ? Math.abs(LATEST_BETAS_252[a].beta) : -1;
+      var bb = LATEST_BETAS_252[b] && LATEST_BETAS_252[b].beta !== null ? Math.abs(LATEST_BETAS_252[b].beta) : -1;
+      return bb - ba;
+    });
+    var top = ranked[0];
+    var td  = LATEST_BETAS_252[top];
     var domEl = document.getElementById('dp_dominant');
     if (domEl) {
-      var top = ranked[0];
-      var td  = latest[top];
       if (td && td.beta !== null) {
         var regime = {spread:'RATES-DRIVEN',spx:'RISK-DRIVEN',usdcnh:'CNH-DRIVEN',iron:'COMMODITIES-DRIVEN'};
         domEl.textContent = regime[top] || top.toUpperCase();
-      } else {
-        domEl.textContent = 'UNCLEAR';
-      }
+      } else { domEl.textContent = 'UNCLEAR'; }
     }
   }
 
-  /* ── TOGGLE ── */
-  var toggleEl = document.getElementById('dp_toggleBtns');
-  if (toggleEl) toggleEl.addEventListener('click', function(e) {
-    var btn = e.target.closest('[data-w]'); if (!btn) return;
-    this.querySelectorAll('.preset').forEach(function(b){b.classList.remove('active');});
-    btn.classList.add('active');
-    activeLatest = btn.dataset.w === '104' ? LATEST_BETAS_252 : LATEST_BETAS_60;
-    renderRegime(activeLatest);
-  });
-
   renderToday();
-  renderRegime(activeLatest);
+  renderRegime(LATEST_BETAS_1M,  'dp_regime_1m', 'dp_r2_1m');
+  renderRegime(LATEST_BETAS_60,  'dp_regime_1y', 'dp_r2_1y');
+  renderRegime(LATEST_BETAS_252, 'dp_regime_2y', 'dp_r2_2y');
+  setDominant();
 })();
 </script>"""
 
