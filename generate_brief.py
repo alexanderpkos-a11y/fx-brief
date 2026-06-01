@@ -49,7 +49,7 @@ def _yf(ticker, days=7):
         print(f'  [WARN] YF {ticker}: {e}')
     return None, None, None
 
-def _yf_history(ticker, range_str='4mo'):
+def _yf_history(ticker, range_str='10y'):
     """Fetch ~4 months of daily close history from Yahoo Finance.
     Returns {date_str: float}. Empty dict on failure."""
     try:
@@ -81,7 +81,7 @@ def _fetch_us2y_av():
             rate = float(series[0]['value'])
             date_str = series[0]['date']
             hist = {}
-            for pt in series[:120]:
+            for pt in series:
                 try:
                     hist[pt['date']] = float(pt['value'])
                 except (ValueError, KeyError):
@@ -103,7 +103,7 @@ def _fetch_rba_f2():
         if len(data_rows) >= 2:
             last, prev = data_rows[-1], data_rows[-2]
             hist = {}
-            for r in data_rows[-120:]:
+            for r in data_rows:
                 try:
                     dt = datetime.strptime(r[0], '%d-%b-%Y').strftime('%Y-%m-%d')
                     hist[dt] = float(r[1])
@@ -222,6 +222,35 @@ def compute_correlations(aud_hist, driver_hists, use_diffs, windows=(20, 60), mi
                 ys = [drv_by_date[d] for d in tail]
                 results[name][w] = (_pearson(xs, ys), n)
     return results
+
+def _compute_rolling_corr_series(aud_hist, driver_hists, use_diffs, window=20, sample_every=5):
+    """Rolling Pearson for each driver vs AUD/USD over the full history.
+    Returns list of {date, spread, iron_ore, spx, usdcnh, dxy, audusd} records,
+    sampled every sample_every AUD/USD trading days (5 ≈ weekly)."""
+    aud_rets = dict(_log_returns(aud_hist))
+    drv_rets = {
+        name: dict(_first_diffs(hist) if name in use_diffs else _log_returns(hist))
+        for name, hist in driver_hists.items()
+    }
+    all_dates = sorted(aud_rets.keys())
+    min_obs = round(window * 0.75)
+    records = []
+    for i in range(window, len(all_dates)):
+        if i % sample_every != 0 and i < len(all_dates) - 1:
+            continue
+        date = all_dates[i]
+        win_dates = all_dates[i - window:i]
+        rec = {'date': date, 'audusd': round(aud_hist.get(date, 0), 4)}
+        for name, drets in drv_rets.items():
+            pairs = [(aud_rets[d], drets[d]) for d in win_dates if d in drets]
+            if len(pairs) < min_obs:
+                rec[name] = None
+            else:
+                xs, ys = zip(*pairs)
+                r = _pearson(list(xs), list(ys))
+                rec[name] = round(r, 3) if r is not None else None
+        records.append(rec)
+    return records
 
 # ---------------------------------------------------------------------------
 # DRIVER ATTRIBUTION RENDERER
@@ -402,6 +431,16 @@ for _name, _res in corr_results.items():
           f'  r60={f"{_r60:.3f}" if _r60 else "n/c":>7} ({_n60}obs)')
 
 attribution_html = _render_attribution_panel(corr_results)
+
+print('Computing rolling correlation series (10y backdate)…')
+_corr_series_20 = _compute_rolling_corr_series(
+    _hist_results.get('audusd', {}), _driver_hists, use_diffs={'spread'}, window=20)
+_corr_series_60 = _compute_rolling_corr_series(
+    _hist_results.get('audusd', {}), _driver_hists, use_diffs={'spread'}, window=60)
+print(f'  20d series: {len(_corr_series_20)} records  |  60d series: {len(_corr_series_60)} records')
+_c20j = json.dumps(_corr_series_20, separators=(',', ':'))
+_c60j = json.dumps(_corr_series_60, separators=(',', ':'))
+corr_data_script = f'<script>\nvar CORR20_SERIES={_c20j};\nvar CORR60_SERIES={_c60j};\n</script>'
 
 # ---------------------------------------------------------------------------
 # ASSEMBLE DATA DICT
@@ -712,6 +751,220 @@ COT_CHART_HTML = """
 </div>
 <p class="source">Source: CFTC TFF Futures-Only (positioning) &middot; Alpha Vantage (AUD/USD) &middot; net = long &minus; short contracts. Weekly, Tuesday close.</p>
 """
+
+# Section: Correlation history chart (10-year rolling Pearson vs AUD/USD)
+CORR_CHART_HTML = """
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+  <div class="legend">
+    <span><span class="dot" style="background:#4b8ef0"></span>AU&ndash;US spread</span>
+    <span><span class="dot" style="background:#e09438"></span>Iron ore</span>
+    <span><span class="dot" style="background:#2fcb9a"></span>S&amp;P 500</span>
+    <span><span class="dot" style="background:#c084fc"></span>USD/CNY</span>
+    <span><span class="dot" style="background:#f05a52"></span>DXY</span>
+  </div>
+  <div id="corr_toggleBtns" class="presets" style="margin-top:0">
+    <button class="preset active" data-w="20">20d</button>
+    <button class="preset" data-w="60">60d</button>
+  </div>
+</div>
+
+<div class="panel-box">
+  <div class="panel-title">Rolling correlation vs AUD/USD</div>
+  <div class="chart-holder" style="height:300px"><canvas id="corr_chart"></canvas></div>
+
+  <div class="slider-wrap">
+    <div class="slider-head">
+      <div class="k">Date range</div>
+      <div class="range-readout"><b id="corr_rangeStart">&mdash;</b> &nbsp;&rarr;&nbsp; <b id="corr_rangeEnd">&mdash;</b></div>
+    </div>
+    <div class="dual">
+      <div class="track"></div>
+      <div class="track-fill" id="corr_trackFill"></div>
+      <input type="range" id="corr_minR" min="0" max="100" value="0">
+      <input type="range" id="corr_maxR" min="0" max="100" value="100">
+    </div>
+    <div class="presets" id="corr_presets">
+      <button class="preset" data-y="1">1Y</button>
+      <button class="preset" data-y="2">2Y</button>
+      <button class="preset" data-y="5">5Y</button>
+      <button class="preset active" data-y="0">Max</button>
+    </div>
+  </div>
+</div>
+<p class="source">Rolling Pearson &middot; AUD/USD daily log-returns vs driver daily log-returns or spread &Delta;bp &middot; weekly sampled &middot; Yahoo Finance, RBA F2, Alpha Vantage.</p>
+"""
+
+# Chart init script for the correlation history chart (regular string — no f-string escaping needed)
+CORR_INIT_SCRIPT = """<script>
+(function() {
+  var activeSeries = CORR20_SERIES;
+  var DRIVER_COLORS = {
+    spread:'#4b8ef0', iron_ore:'#e09438', spx:'#2fcb9a', usdcnh:'#c084fc', dxy:'#f05a52'
+  };
+  var DRIVER_LABELS = {
+    spread:'AU–US spread', iron_ore:'Iron ore', spx:'S&P 500', usdcnh:'USD/CNY', dxy:'DXY'
+  };
+  var DRIVERS = ['spread','iron_ore','spx','usdcnh','dxy'];
+
+  function buildDatasets(series) {
+    var labels = series.map(function(r){return r.date;});
+    var datasets = DRIVERS.map(function(name){
+      return {
+        label: DRIVER_LABELS[name],
+        data: series.map(function(r){return r[name] !== undefined ? r[name] : null;}),
+        borderColor: DRIVER_COLORS[name],
+        backgroundColor: 'transparent',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.2,
+        spanGaps: false,
+        yAxisID: 'y'
+      };
+    });
+    return {labels: labels, datasets: datasets};
+  }
+
+  var zeroLinePlug = {
+    id: 'zeroLine',
+    afterDraw: function(chart) {
+      var yAxis = chart.scales.y;
+      if (!yAxis) return;
+      var y = yAxis.getPixelForValue(0);
+      var ctx = chart.ctx;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(chart.chartArea.left, y);
+      ctx.lineTo(chart.chartArea.right, y);
+      ctx.strokeStyle = 'rgba(142,162,189,0.3)';
+      ctx.setLineDash([4,4]);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  var corrMin = document.getElementById('corr_minR');
+  var corrMax = document.getElementById('corr_maxR');
+  var N = activeSeries.length - 1;
+  corrMin.max = corrMax.max = N;
+  corrMax.value = N;
+
+  var initData = buildDatasets(activeSeries);
+  var corrChart = new Chart(document.getElementById('corr_chart'), {
+    type: 'line',
+    plugins: [zeroLinePlug],
+    data: {labels: initData.labels, datasets: initData.datasets},
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {duration: 300},
+      interaction: {mode: 'index', intersect: false},
+      scales: {
+        x: {
+          grid: {color: 'rgba(142,162,189,0.10)'},
+          ticks: {
+            color: '#7a92b4',
+            maxTicksLimit: 10,
+            callback: function(val) {
+              var d = this.getLabelForValue(val);
+              return d ? d.slice(0,4) : '';
+            }
+          }
+        },
+        y: {
+          min: -1, max: 1,
+          grid: {color: 'rgba(142,162,189,0.10)'},
+          ticks: {
+            color: '#7a92b4',
+            callback: function(v) { return v.toFixed(2); }
+          }
+        }
+      },
+      plugins: {
+        legend: {display: false},
+        tooltip: {
+          backgroundColor: '#101e36',
+          borderColor: '#1b2d4f',
+          borderWidth: 1,
+          titleColor: '#e2eaf6',
+          bodyColor: '#7a92b4',
+          callbacks: {
+            title: function(items) { return items[0].label; },
+            label: function(item) {
+              var v = item.raw;
+              if (v === null || v === undefined) return item.dataset.label + ': n/c';
+              var sign = v >= 0 ? '+' : '';
+              return item.dataset.label + ': r = ' + sign + v.toFixed(2);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  function fmtDate(d) {
+    return new Date(d + 'T00:00:00').toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
+  }
+
+  function corrApply() {
+    var lo = +corrMin.value, hi = +corrMax.value;
+    var n = activeSeries.length - 1;
+    var slice = activeSeries.slice(lo, hi + 1);
+    var rebuilt = buildDatasets(slice);
+    corrChart.data.labels = rebuilt.labels;
+    corrChart.data.datasets.forEach(function(ds, i) { ds.data = rebuilt.datasets[i].data; });
+    corrChart.update();
+    var fill = document.getElementById('corr_trackFill');
+    fill.style.left = (lo / n * 100) + '%';
+    fill.style.right = ((n - hi) / n * 100) + '%';
+    var start = activeSeries[lo] && activeSeries[lo].date;
+    var end   = activeSeries[hi] && activeSeries[hi].date;
+    if (start) document.getElementById('corr_rangeStart').textContent = fmtDate(start);
+    if (end)   document.getElementById('corr_rangeEnd').textContent   = fmtDate(end);
+  }
+
+  corrMin.addEventListener('input', function() {
+    if (+corrMin.value > +corrMax.value - 2) corrMin.value = +corrMax.value - 2;
+    corrApply();
+  });
+  corrMax.addEventListener('input', function() {
+    if (+corrMax.value < +corrMin.value + 2) corrMax.value = +corrMin.value + 2;
+    corrApply();
+  });
+
+  document.getElementById('corr_presets').addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-y]');
+    if (!btn) return;
+    this.querySelectorAll('.preset').forEach(function(b){b.classList.remove('active');});
+    btn.classList.add('active');
+    var yrs = +btn.dataset.y;
+    var n = activeSeries.length - 1;
+    if (yrs === 0) {
+      corrMin.value = 0;
+    } else {
+      var cutoff = Date.now() - yrs * 365 * 864e5;
+      var idx = activeSeries.findIndex(function(r){return new Date(r.date).getTime() >= cutoff;});
+      corrMin.value = idx < 0 ? 0 : idx;
+    }
+    corrMax.value = n;
+    corrApply();
+  });
+
+  document.getElementById('corr_toggleBtns').addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-w]');
+    if (!btn) return;
+    this.querySelectorAll('.preset').forEach(function(b){b.classList.remove('active');});
+    btn.classList.add('active');
+    activeSeries = btn.dataset.w === '20' ? CORR20_SERIES : CORR60_SERIES;
+    var n = activeSeries.length - 1;
+    corrMin.value = 0; corrMax.value = n;
+    corrMin.max = corrMax.max = n;
+    corrApply();
+  });
+
+  corrApply();
+})();
+</script>"""
 
 # ---------------------------------------------------------------------------
 # HTML TEMPLATE
@@ -1388,6 +1641,17 @@ body {{
 </div>
 
 
+<!-- ─── CORRELATION HISTORY ─── -->
+<div class="section-header" style="margin-top:36px">
+  <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">CORRELATION HISTORY</span>
+  <div class="sec-line"></div>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--panel-edge);border-radius:12px;padding:22px 26px 18px">
+  {CORR_CHART_HTML}
+</div>
+
+
 <!-- ─── 02 RATE DIFFERENTIALS ─── -->
 <div class="section-header">
   <span class="sec-num">02</span>
@@ -1524,7 +1788,7 @@ body {{
       <td>GC=F (front month)</td>
       <td>{data['gold']:,.2f}</td>
       <td>{data['gold_prev']:,.2f}</td>
-      <td class="chg-positive">▲ {fmt_pct(gold_chg)}</td>
+      <td class="{'chg-positive' if (gold_chg or 0) >= 0 else 'chg-negative'}">{'▲' if (gold_chg or 0) >= 0 else '▼'} {fmt_pct(gold_chg)}</td>
       <td>{badge('YF')}</td>
     </tr>
     <tr>
@@ -1532,7 +1796,7 @@ body {{
       <td>HG=F (front month)</td>
       <td>{data['copper']:.3f}</td>
       <td>{data['copper_prev']:.3f}</td>
-      <td class="chg-negative">▼ {fmt_pct(copper_chg)}</td>
+      <td class="{'chg-positive' if (copper_chg or 0) >= 0 else 'chg-negative'}">{'▲' if (copper_chg or 0) >= 0 else '▼'} {fmt_pct(copper_chg)}</td>
       <td>{badge('YF')}</td>
     </tr>
     <tr>
@@ -1556,7 +1820,7 @@ body {{
       <td>A-shares benchmark</td>
       <td>{data['csi300']:,.1f}</td>
       <td>{data['csi300_prev']:,.1f}</td>
-      <td class="chg-negative">▼ {fmt_pct(csi300_chg)}</td>
+      <td class="{'chg-positive' if (csi300_chg or 0) >= 0 else 'chg-negative'}">{'▲' if (csi300_chg or 0) >= 0 else '▼'} {fmt_pct(csi300_chg)}</td>
       <td>{badge('YF')}</td>
     </tr>
     <tr>
@@ -1564,7 +1828,7 @@ body {{
       <td>HSI — H-shares proxy</td>
       <td>{data['hsi']:,.1f}</td>
       <td>{data['hsi_prev']:,.1f}</td>
-      <td class="chg-positive">▲ {fmt_pct(hsi_chg)}</td>
+      <td class="{'chg-positive' if (hsi_chg or 0) >= 0 else 'chg-negative'}">{'▲' if (hsi_chg or 0) >= 0 else '▼'} {fmt_pct(hsi_chg)}</td>
       <td>{badge('YF')}</td>
     </tr>
   </tbody>
@@ -1686,6 +1950,9 @@ body {{
 </main>
 
 {chart_js}
+
+{corr_data_script}
+{CORR_INIT_SCRIPT}
 
 </body>
 </html>
