@@ -1465,10 +1465,6 @@ DRIVER_CSS = """
 .dp-bar.dp-neg{background:#f05a52;right:0}
 .dp-pct{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--text);text-align:right}
 .dp-tag{font-size:0.62rem;color:var(--text-faint)}
-.dp-badge{display:inline-block;font-size:0.57rem;letter-spacing:.05em;padding:1px 6px;border-radius:8px;white-space:nowrap;vertical-align:middle;margin-left:5px}
-.dp-badge.sig2{background:rgba(240,148,56,.18);color:var(--amber);border:1px solid rgba(240,148,56,.35)}
-.dp-badge.sig1{background:rgba(122,146,180,.12);color:var(--text-faint);border:1px solid rgba(122,146,180,.25)}
-.dp-badge.anomaly{background:rgba(240,90,82,.12);color:#f05a52;border:1px solid rgba(240,90,82,.3)}
 .dp-regime-row{display:grid;grid-template-columns:18px 130px 76px 1fr;align-items:center;gap:6px;font-size:0.73rem}
 .dp-regime-rank{color:var(--text-faint);font-size:0.62rem;text-align:center}
 .dp-regime-name{display:flex;align-items:center;color:var(--text-dim)}
@@ -1541,17 +1537,6 @@ DRIVER_INIT_SCRIPT = """<script>
   }
 
   /* ── CURRENT REGIME ── */
-  function betaBadge(name, d) {
-    if (!d || d.beta === null || d.beta === undefined) return '';
-    var b = d.beta, exp = DRIVER_SIGN[name];
-    if (d.u2 !== null && (b > d.u2 || b < d.l2))
-      return '<span class="dp-badge sig2">outside \xb12σ</span>';
-    if (d.u1 !== null && (b > d.u1 || b < d.l1))
-      return '<span class="dp-badge sig1">near \xb11σ</span>';
-    if (Math.abs(b) > 0.01 && ((b > 0 ? 1 : -1) !== exp))
-      return '<span class="dp-badge anomaly">sign anomaly</span>';
-    return '';
-  }
 
   function renderRegime(latest, containerId, r2Id) {
     if (!latest) return;
@@ -1571,7 +1556,6 @@ DRIVER_INIT_SCRIPT = """<script>
       var d = latest[name];
       var betaTxt = (!d || d.beta === null || d.beta === undefined) ? 'n/a'
         : (d.beta >= 0 ? '+' : '') + d.beta.toFixed(3);
-      var badge = (!d || d.beta === null || d.beta === undefined) ? '' : betaBadge(name, d);
       var sigmaTxt = '';
       if (d && d.beta !== null && d.mean !== null && d.u1 !== null) {
         var std = d.u1 - d.mean;
@@ -1588,7 +1572,6 @@ DRIVER_INIT_SCRIPT = """<script>
         + DRIVER_LABEL[name] + sigmaTxt + '</span>'
         + '<span style="font-family:\\'IBM Plex Mono\\',monospace;font-size:0.67rem;color:var(--text);text-align:right;white-space:nowrap">β ' + betaTxt + '</span>'
         + '</div>';
-      if (badge) html += '<div style="margin-bottom:3px;padding-left:18px">' + badge + '</div>';
     });
     container.innerHTML = html;
   }

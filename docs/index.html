@@ -593,10 +593,6 @@ body {
 .dp-bar.dp-neg{background:#f05a52;right:0}
 .dp-pct{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--text);text-align:right}
 .dp-tag{font-size:0.62rem;color:var(--text-faint)}
-.dp-badge{display:inline-block;font-size:0.57rem;letter-spacing:.05em;padding:1px 6px;border-radius:8px;white-space:nowrap;vertical-align:middle;margin-left:5px}
-.dp-badge.sig2{background:rgba(240,148,56,.18);color:var(--amber);border:1px solid rgba(240,148,56,.35)}
-.dp-badge.sig1{background:rgba(122,146,180,.12);color:var(--text-faint);border:1px solid rgba(122,146,180,.25)}
-.dp-badge.anomaly{background:rgba(240,90,82,.12);color:#f05a52;border:1px solid rgba(240,90,82,.3)}
 .dp-regime-row{display:grid;grid-template-columns:18px 130px 76px 1fr;align-items:center;gap:6px;font-size:0.73rem}
 .dp-regime-rank{color:var(--text-faint);font-size:0.62rem;text-align:center}
 .dp-regime-name{display:flex;align-items:center;color:var(--text-dim)}
@@ -649,9 +645,9 @@ body {
       <span class="tile-label">DXY Index</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value red">99.008</div>
+    <div class="tile-value red">99.003</div>
     <div class="tile-bottom">
-      <span class="red">▲ +0.10%</span>
+      <span class="red">▲ +0.09%</span>
       <span class="tile-ref">prev 98.910</span>
     </div>
   </div>
@@ -674,9 +670,9 @@ body {
       <span class="tile-label">Gold (GC=F)</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value gold">4,546.80</div>
+    <div class="tile-value gold">4,546.30</div>
     <div class="tile-bottom">
-      <span class="red">▼ -0.30%</span>
+      <span class="red">▼ -0.31%</span>
       <span class="tile-ref">prev 4,560.50</span>
     </div>
   </div>
@@ -687,9 +683,9 @@ body {
       <span class="tile-label">AUD / JPY</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value green">114.583</div>
+    <div class="tile-value green">114.596</div>
     <div class="tile-bottom">
-      <span class="green">▲ +0.46%</span>
+      <span class="green">▲ +0.47%</span>
       <span class="tile-ref">prev 114.060</span>
     </div>
   </div>
@@ -700,7 +696,7 @@ body {
       <span class="tile-label">USD / CNH</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value mono dim-text">6.7654</div>
+    <div class="tile-value mono dim-text">6.7655</div>
     <div class="tile-bottom">
       <span class="data-gap">prev close n/a</span>
     </div>
@@ -1195,17 +1191,17 @@ body {
     <tr>
       <td>Gold</td>
       <td>GC=F (front month)</td>
-      <td>4,546.80</td>
+      <td>4,546.30</td>
       <td>4,560.50</td>
-      <td class="chg-negative">▼ -0.30%</td>
+      <td class="chg-negative">▼ -0.31%</td>
       <td><span class="badge badge-yf">YF</span></td>
     </tr>
     <tr>
       <td>Copper</td>
       <td>HG=F (front month)</td>
-      <td>6.460</td>
+      <td>6.461</td>
       <td>6.359</td>
-      <td class="chg-positive">▲ +1.59%</td>
+      <td class="chg-positive">▲ +1.60%</td>
       <td><span class="badge badge-yf">YF</span></td>
     </tr>
     <tr>
@@ -1219,7 +1215,7 @@ body {
     <tr>
       <td>USD / CNH</td>
       <td>Offshore RMB</td>
-      <td>6.7654</td>
+      <td>6.7655</td>
       <td class="data-gap">prev n/a</td>
       <td class="data-gap">n/a</td>
       <td><span class="badge badge-yf">YF</span></td>
@@ -1227,17 +1223,17 @@ body {
     <tr>
       <td>CSI 300</td>
       <td>A-shares benchmark</td>
-      <td>4,875.0</td>
+      <td>4,877.2</td>
       <td>4,892.1</td>
-      <td class="chg-negative">▼ -0.35%</td>
+      <td class="chg-negative">▼ -0.31%</td>
       <td><span class="badge badge-yf">YF</span></td>
     </tr>
     <tr>
       <td>Hang Seng Index</td>
       <td>HSI — H-shares proxy</td>
-      <td>25,415.3</td>
+      <td>25,424.7</td>
       <td>25,182.4</td>
-      <td class="chg-positive">▲ +0.92%</td>
+      <td class="chg-positive">▲ +0.96%</td>
       <td><span class="badge badge-yf">YF</span></td>
     </tr>
   </tbody>
@@ -1834,17 +1830,6 @@ var TODAY_ATTRIBUTION={"date":"2026-05-29","audusd_lr":0.002222,"audusd_pct":0.2
   }
 
   /* ── CURRENT REGIME ── */
-  function betaBadge(name, d) {
-    if (!d || d.beta === null || d.beta === undefined) return '';
-    var b = d.beta, exp = DRIVER_SIGN[name];
-    if (d.u2 !== null && (b > d.u2 || b < d.l2))
-      return '<span class="dp-badge sig2">outside ±2σ</span>';
-    if (d.u1 !== null && (b > d.u1 || b < d.l1))
-      return '<span class="dp-badge sig1">near ±1σ</span>';
-    if (Math.abs(b) > 0.01 && ((b > 0 ? 1 : -1) !== exp))
-      return '<span class="dp-badge anomaly">sign anomaly</span>';
-    return '';
-  }
 
   function renderRegime(latest, containerId, r2Id) {
     if (!latest) return;
@@ -1864,7 +1849,6 @@ var TODAY_ATTRIBUTION={"date":"2026-05-29","audusd_lr":0.002222,"audusd_pct":0.2
       var d = latest[name];
       var betaTxt = (!d || d.beta === null || d.beta === undefined) ? 'n/a'
         : (d.beta >= 0 ? '+' : '') + d.beta.toFixed(3);
-      var badge = (!d || d.beta === null || d.beta === undefined) ? '' : betaBadge(name, d);
       var sigmaTxt = '';
       if (d && d.beta !== null && d.mean !== null && d.u1 !== null) {
         var std = d.u1 - d.mean;
@@ -1881,7 +1865,6 @@ var TODAY_ATTRIBUTION={"date":"2026-05-29","audusd_lr":0.002222,"audusd_pct":0.2
         + DRIVER_LABEL[name] + sigmaTxt + '</span>'
         + '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:0.67rem;color:var(--text);text-align:right;white-space:nowrap">β ' + betaTxt + '</span>'
         + '</div>';
-      if (badge) html += '<div style="margin-bottom:3px;padding-left:18px">' + badge + '</div>';
     });
     container.innerHTML = html;
   }
