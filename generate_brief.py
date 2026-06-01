@@ -1425,19 +1425,25 @@ DRIVER_PANEL_HTML = """
   <div style="font-size:0.65rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint);margin-bottom:10px">Current regime &nbsp;&middot;&nbsp; sensitivity ranked by |&beta;|</div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
     <div>
-      <div style="font-size:0.58rem;letter-spacing:.1em;text-transform:uppercase;color:#4b8ef0;padding-bottom:5px;border-bottom:1px solid var(--panel-edge);margin-bottom:7px">1M &middot; daily</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;padding-bottom:5px;border-bottom:1px solid var(--panel-edge);margin-bottom:7px">
+        <span style="font-size:0.58rem;letter-spacing:.1em;text-transform:uppercase;color:#4b8ef0">1M &middot; daily</span>
+        <span style="font-size:0.58rem;color:var(--text-faint)">R&sup2;&nbsp;<span id="dp_r2_1m" style="color:var(--text)">—</span></span>
+      </div>
       <div id="dp_regime_1m"></div>
-      <div style="font-size:0.6rem;color:var(--text-faint);margin-top:6px">R&sup2;&nbsp;=&nbsp;<span id="dp_r2_1m">—</span></div>
     </div>
     <div>
-      <div style="font-size:0.58rem;letter-spacing:.1em;text-transform:uppercase;color:#2fcb9a;padding-bottom:5px;border-bottom:1px solid var(--panel-edge);margin-bottom:7px">1Y &middot; weekly</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;padding-bottom:5px;border-bottom:1px solid var(--panel-edge);margin-bottom:7px">
+        <span style="font-size:0.58rem;letter-spacing:.1em;text-transform:uppercase;color:#2fcb9a">1Y &middot; weekly</span>
+        <span style="font-size:0.58rem;color:var(--text-faint)">R&sup2;&nbsp;<span id="dp_r2_1y" style="color:var(--text)">—</span></span>
+      </div>
       <div id="dp_regime_1y"></div>
-      <div style="font-size:0.6rem;color:var(--text-faint);margin-top:6px">R&sup2;&nbsp;=&nbsp;<span id="dp_r2_1y">—</span></div>
     </div>
     <div>
-      <div style="font-size:0.58rem;letter-spacing:.1em;text-transform:uppercase;color:#f0b329;padding-bottom:5px;border-bottom:1px solid var(--panel-edge);margin-bottom:7px">2Y &middot; weekly</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;padding-bottom:5px;border-bottom:1px solid var(--panel-edge);margin-bottom:7px">
+        <span style="font-size:0.58rem;letter-spacing:.1em;text-transform:uppercase;color:#f0b329">2Y &middot; weekly</span>
+        <span style="font-size:0.58rem;color:var(--text-faint)">R&sup2;&nbsp;<span id="dp_r2_2y" style="color:var(--text)">—</span></span>
+      </div>
       <div id="dp_regime_2y"></div>
-      <div style="font-size:0.6rem;color:var(--text-faint);margin-top:6px">R&sup2;&nbsp;=&nbsp;<span id="dp_r2_2y">—</span></div>
     </div>
   </div>
   <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--panel-edge);font-size:0.68rem;color:var(--text-faint)">
@@ -1566,11 +1572,20 @@ DRIVER_INIT_SCRIPT = """<script>
       var betaTxt = (!d || d.beta === null || d.beta === undefined) ? 'n/a'
         : (d.beta >= 0 ? '+' : '') + d.beta.toFixed(3);
       var badge = (!d || d.beta === null || d.beta === undefined) ? '' : betaBadge(name, d);
+      var sigmaTxt = '';
+      if (d && d.beta !== null && d.mean !== null && d.u1 !== null) {
+        var std = d.u1 - d.mean;
+        if (std > 0.0001) {
+          var z = (d.beta - d.mean) / std;
+          sigmaTxt = '<span style="font-size:0.57rem;color:var(--text-faint);margin-left:3px">'
+            + (z >= 0 ? '+' : '') + z.toFixed(1) + 'σ</span>';
+        }
+      }
       html += '<div style="display:grid;grid-template-columns:14px 1fr auto;align-items:center;gap:4px;margin-bottom:4px">'
         + '<span style="color:var(--text-faint);font-size:0.57rem;text-align:center">' + (idx + 1) + '</span>'
         + '<span style="display:flex;align-items:center;gap:4px;font-size:0.7rem;color:var(--text-dim)">'
         + '<span class="dot" style="background:' + DRIVER_COLOR[name] + ';width:7px;height:7px;flex-shrink:0"></span>'
-        + DRIVER_LABEL[name] + '</span>'
+        + DRIVER_LABEL[name] + sigmaTxt + '</span>'
         + '<span style="font-family:\\'IBM Plex Mono\\',monospace;font-size:0.67rem;color:var(--text);text-align:right;white-space:nowrap">β ' + betaTxt + '</span>'
         + '</div>';
       if (badge) html += '<div style="margin-bottom:3px;padding-left:18px">' + badge + '</div>';
