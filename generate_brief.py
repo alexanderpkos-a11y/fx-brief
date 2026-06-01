@@ -1142,29 +1142,6 @@ body {{
 
 {RD_CHART_HTML}
 
-<div class="cards-row">
-  <!-- RBA Card -->
-  <div class="mini-card">
-    <div class="mini-card-title">RBA Policy Status</div>
-    <div class="mini-card-status green">Easing Bias Active</div>
-    <div class="mini-card-detail">
-      Cash Rate Target: <strong>{f"{rba_cash_rate:.2f}%" if rba_cash_rate else "4.35%"}</strong><br>
-      May 2026 meeting: on hold &nbsp;&bull;&nbsp; RBA F1 data<br>
-      Next meeting: <strong>16&ndash;17 Jun 2026</strong>
-    </div>
-  </div>
-  <!-- FOMC Card -->
-  <div class="mini-card">
-    <div class="mini-card-title">FOMC Policy Status</div>
-    <div class="mini-card-status amber">Hold — Data Dependent</div>
-    <div class="mini-card-detail">
-      Fed Funds Target: <strong>4.25–4.50%</strong><br>
-      Last move: &minus;25 bp &nbsp;&bull;&nbsp; Dec 2024<br>
-      Next meeting: <strong>17–18 Jun 2026</strong><br>
-      SEP / Dot plot: <span class="pending-field">June update pending</span>
-    </div>
-  </div>
-</div>
 
 
 <!-- ─── 03 COT POSITIONING ─── -->
