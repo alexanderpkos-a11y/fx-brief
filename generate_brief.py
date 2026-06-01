@@ -468,90 +468,6 @@ def _static_ols_diagnostics(y_arr, X_arr, col_names):
 # ---------------------------------------------------------------------------
 # DRIVER ATTRIBUTION RENDERER
 # ---------------------------------------------------------------------------
-_DRIVER_LABELS = {
-    'spread':   'AU–US 2y spread',
-    'iron_ore': 'Iron ore (TIO=F)',
-    'spx':      'S&P 500',
-    'usdcnh':   'USD/CNY (CNH proxy)',
-    'dxy':      'DXY',
-}
-_DRIVER_EXPECTED_SIGN = {'spread': 1, 'iron_ore': 1, 'spx': 1, 'usdcnh': -1, 'dxy': -1}
-_DRIVER_HEADLINE = {
-    'spread':   'RATES-DRIVEN',
-    'iron_ore': 'CHINA / COMMODITIES-DRIVEN',
-    'spx':      'RISK-DRIVEN',
-    'usdcnh':   'CNH-DRIVEN',
-    'dxy':      'USD-DRIVEN',
-}
-
-def _render_attribution_panel(corr):
-    """Return HTML string for the driver attribution panel."""
-    def r_str(r):
-        return f'{r:+.2f}' if r is not None else 'n/c'
-
-    # Sort by |r_20| descending
-    ranked = sorted(corr, key=lambda n: abs(corr[n][20][0] or 0), reverse=True)
-
-    # Headline
-    top = ranked[0] if ranked else None
-    top_r = corr[top][20][0] if top else None
-    if top_r is not None and abs(top_r) >= 0.25:
-        headline = f'{_DRIVER_HEADLINE[top]} — {_DRIVER_LABELS[top]} leads at r&nbsp;=&nbsp;{r_str(top_r)}&nbsp;(20d)'
-    else:
-        headline = 'DRIVER UNCLEAR — low correlation across all channels'
-
-    # S&P regime flag
-    spx_r20 = corr.get('spx', {}).get(20, (None, 0))[0]
-    spx_r60 = corr.get('spx', {}).get(60, (None, 0))[0]
-    if spx_r20 is not None:
-        if spx_r20 > 0.45:
-            flag_label, flag_txt = 'RISK COUPLING', f'S&amp;P r&nbsp;=&nbsp;{r_str(spx_r20)}&nbsp;(20d) — equity sentiment co-moving with AUD'
-        elif spx_r20 < 0.25 and spx_r60 is not None and spx_r60 > 0.40:
-            flag_label, flag_txt = 'RISK DECOUPLING', f'S&amp;P r&nbsp;=&nbsp;{r_str(spx_r20)}&nbsp;(20d) vs {r_str(spx_r60)}&nbsp;(60d) — fading; idiosyncratic driver emerging'
-        elif spx_r20 < 0.25:
-            flag_label, flag_txt = 'RISK DECOUPLED', f'S&amp;P r&nbsp;=&nbsp;{r_str(spx_r20)}&nbsp;(20d) — rates, China, or USD driving instead'
-        else:
-            flag_label, flag_txt = 'MODERATE RISK COUPLING', f'S&amp;P r&nbsp;=&nbsp;{r_str(spx_r20)}&nbsp;(20d)'
-    else:
-        flag_label, flag_txt = 'RISK — INSUFFICIENT DATA', 'Fewer than 15 overlapping daily observations in 20d window'
-
-    # Bar rows
-    rows = ''
-    for name in ranked:
-        r20, n20 = corr[name][20]
-        r60, n60 = corr[name][60]
-        label = _DRIVER_LABELS[name]
-        exp = _DRIVER_EXPECTED_SIGN[name]
-        low = r20 is None
-        if low:
-            fill_cls, w20 = 'attr-fill positive', '0%'
-            val20 = 'n/c*'
-        else:
-            anomaly = abs(r20) > 0.3 and ((1 if r20 > 0 else -1) != exp)
-            fill_cls = 'attr-fill anomaly' if anomaly else ('attr-fill positive' if r20 >= 0 else 'attr-fill negative')
-            w20  = f'{abs(r20)*100:.1f}%'
-            val20 = r_str(r20)
-        m60_left = f'{abs(r60)*100:.1f}%' if r60 is not None else '0%'
-        val60    = r_str(r60)
-        caveat   = ' <span class="attr-caveat">⚠&nbsp;DXY≈58%&nbsp;EUR</span>' if name == 'dxy' else ''
-        row_cls  = 'attr-row attr-low-conf' if low else 'attr-row'
-        rows += f"""
-    <div class="{row_cls}">
-      <span class="attr-label">{label}</span>
-      <div class="attr-track">
-        <div class="{fill_cls}" style="width:{w20}"></div>
-        <span class="attr-marker-60d" style="left:{m60_left}" title="60d: {val60}"></span>
-      </div>
-      <span class="attr-val">{val20}</span>
-      <span class="attr-val-60d">{val60}&nbsp;(60d)</span>{caveat}
-    </div>"""
-
-    return f"""<div class="attr-headline">{headline}</div>
-  <div class="attr-section">{rows}
-  </div>
-  <div class="attr-flag"><strong>&#x26A1; {flag_label}</strong> &nbsp;&mdash;&nbsp; {flag_txt}</div>
-  <p class="attr-note">Daily log&nbsp;returns / spread&nbsp;&Delta;bp &middot; 20-trading-day window &middot; &#9670;&nbsp;=&nbsp;60d marker &middot; *&nbsp;=&nbsp;low&nbsp;confidence (&lt;{round(20*0.75)}&nbsp;obs).<br>
-  Caveats: AU yields close ~4h before NYC (half-day skew on spread) &middot; DXY is 58%&nbsp;EUR-weighted, not a pure AUD/USD&nbsp;inverse &middot; TIO=F liquidity thins near contract&nbsp;roll.</p>"""
 
 # ---------------------------------------------------------------------------
 # FETCH ALL LIVE DATA
@@ -643,7 +559,6 @@ for _name, _res in corr_results.items():
     print(f'  {_name:12} r20={f"{_r20:.3f}" if _r20 else "n/c":>7} ({_n20}obs)'
           f'  r60={f"{_r60:.3f}" if _r60 else "n/c":>7} ({_n60}obs)')
 
-attribution_html = _render_attribution_panel(corr_results)
 
 print('Computing rolling correlation series (10y backdate)…')
 _corr_series_20 = _compute_rolling_corr_series(
@@ -950,24 +865,6 @@ CHART_CSS = """
 .preset.active{background:var(--aud);border-color:var(--aud);color:var(--ink);font-weight:600}
 .source{margin-top:18px;margin-bottom:6px;font-size:11px;color:var(--text-faint);letter-spacing:.03em}
 
-/* ── DRIVER ATTRIBUTION PANEL ── */
-.attr-headline{font-family:'Fraunces',serif;font-size:1.05rem;font-weight:600;color:var(--gold);margin-bottom:20px;letter-spacing:-.01em}
-.attr-section{margin-bottom:12px}
-.attr-row{display:flex;align-items:center;gap:10px;margin-bottom:9px;font-size:0.78rem}
-.attr-low-conf{opacity:.42}
-.attr-label{width:155px;color:var(--text-dim);flex-shrink:0;font-size:0.75rem}
-.attr-track{flex:1;height:8px;background:var(--panel-edge);border-radius:4px;position:relative;min-width:80px}
-.attr-fill{height:100%;border-radius:4px;position:absolute;top:0;left:0}
-.attr-fill.positive{background:var(--green)}
-.attr-fill.negative{background:var(--red)}
-.attr-fill.anomaly{background:var(--amber)}
-.attr-marker-60d{position:absolute;top:-4px;width:2px;height:16px;background:var(--gold);border-radius:1px;opacity:.6}
-.attr-val{width:42px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--text)}
-.attr-val-60d{width:76px;color:var(--text-faint);font-size:0.68rem}
-.attr-caveat{font-size:0.65rem;color:var(--amber);margin-left:4px;opacity:.85}
-.attr-flag{background:rgba(240,179,41,.07);border:1px solid rgba(240,179,41,.18);border-radius:8px;padding:10px 16px;font-size:0.75rem;color:var(--text-dim);margin-top:16px;line-height:1.55}
-.attr-flag strong{color:var(--gold)}
-.attr-note{margin-top:14px;font-size:0.66rem;color:var(--text-faint);line-height:1.65}
 """
 
 # Section 02 chart markup (replaces the old yield table).
@@ -2122,17 +2019,6 @@ body {{
   </div>
 
 </div><!-- /tiles-grid -->
-
-
-<!-- ─── DRIVER ATTRIBUTION ─── -->
-<div class="section-header" style="margin-top:36px">
-  <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">DRIVER ATTRIBUTION</span>
-  <div class="sec-line"></div>
-</div>
-
-<div style="background:var(--surface);border:1px solid var(--panel-edge);border-radius:12px;padding:22px 26px 18px">
-  {attribution_html}
-</div>
 
 
 <!-- ─── CORRELATION HISTORY ─── -->
