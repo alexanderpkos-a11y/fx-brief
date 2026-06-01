@@ -699,10 +699,41 @@ _latest_betas_60  = _build_latest_betas(_latest_60,  _BETA_DRIVERS)
 
 _lb252j = json.dumps(_latest_betas_252, separators=(',', ':'))
 _lb60j  = json.dumps(_latest_betas_60,  separators=(',', ':'))
+
+# Today's move attribution: actual driver returns × 252d rolling betas
+_last_aud_lr = float(_beta_y[-1]) if len(_beta_y) else 0.0
+_last_X_row  = _beta_X[-1, 1:] if len(_beta_X) else np.zeros(5)
+_last_date   = _beta_dates[-1] if _beta_dates else ''
+_today_contribs = {}
+for _i, _name in enumerate(_BETA_DRIVERS):
+    _bi = (_latest_betas_252.get(_name) or {}).get('beta')
+    _xi = float(_last_X_row[_i]) if np.isfinite(_last_X_row[_i]) else None
+    if _bi is not None and _xi is not None:
+        _lr = _bi * _xi
+        _today_contribs[_name] = {
+            'lr':         round(_lr, 6),
+            'pct':        round((math.exp(_lr) - 1) * 100, 4),
+            'driver_pct': round(_xi * 100, 4) if _name != 'spread' else round(_xi, 4),
+        }
+    else:
+        _today_contribs[_name] = None
+_exp_lr = sum(v['lr'] for v in _today_contribs.values() if v)
+_resid  = _last_aud_lr - _exp_lr
+today_attribution = {
+    'date':         _last_date,
+    'audusd_lr':    round(_last_aud_lr, 6),
+    'audusd_pct':   round((math.exp(_last_aud_lr) - 1) * 100, 4),
+    'contribs':     _today_contribs,
+    'explained_pct': round((math.exp(_exp_lr) - 1) * 100, 4),
+    'residual_pct': round((math.exp(_resid) - 1) * 100, 4),
+}
+_attribj = json.dumps(today_attribution, separators=(',', ':'))
+
 beta_data_script = (
     f'<script>\n'
     f'var LATEST_BETAS_252={_lb252j};\n'
     f'var LATEST_BETAS_60={_lb60j};\n'
+    f'var TODAY_ATTRIBUTION={_attribj};\n'
     f'</script>'
 )
 
@@ -1051,10 +1082,10 @@ CORR_CHART_HTML = """
       <input type="range" id="corr_maxR" min="0" max="100" value="100">
     </div>
     <div class="presets" id="corr_presets">
-      <button class="preset" data-y="1">1Y</button>
+      <button class="preset active" data-y="1">1Y</button>
       <button class="preset" data-y="2">2Y</button>
       <button class="preset" data-y="5">5Y</button>
-      <button class="preset active" data-y="0">Max</button>
+      <button class="preset" data-y="0">Max</button>
     </div>
   </div>
 </div>
@@ -1279,320 +1310,253 @@ CORR_INIT_SCRIPT = """<script>
     corrMin.value=0; corrMax.value=n; corrMin.max=corrMax.max=n; corrApply();
   });
 
-  corrApply();
+  (function(){
+    var cutoff=Date.now()-365*864e5;
+    var idx=activeSeries.findIndex(function(r){return new Date(r.date).getTime()>=cutoff;});
+    corrMin.value=idx<0?0:idx; corrMax.value=N; corrApply();
+  })();
 })();
 </script>"""
 
 # ---------------------------------------------------------------------------
-# BETA SENSITIVITY PANEL
+# DRIVER ATTRIBUTION PANEL  (replaces slider-based beta sensitivity panel)
 # ---------------------------------------------------------------------------
-BETA_PANEL_HTML = """
+DRIVER_PANEL_HTML = """
+<!-- Toggle row -->
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
   <div style="font-size:0.72rem;color:var(--text-dim)">
-    Rolling OLS betas &nbsp;&middot;&nbsp; adjust driver moves &rarr; implied AUD/USD impact
+    Rolling OLS &nbsp;&middot;&nbsp; what moved AUD/USD and what drives it now
   </div>
-  <div id="beta_toggleBtns" class="presets" style="margin-top:0">
+  <div id="dp_toggleBtns" class="presets" style="margin-top:0">
     <button class="preset active" data-w="252">252d</button>
     <button class="preset" data-w="60">60d</button>
   </div>
 </div>
 
-<div class="panel-box" style="padding:18px 22px 16px">
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:18px;flex-wrap:wrap;gap:6px">
-    <div class="panel-title" style="font-size:15px">Beta sensitivity tool</div>
-    <div style="font-size:0.68rem;color:var(--text-faint)">
-      R&sup2;&nbsp;=&nbsp;<span id="beta_r2">—</span> &nbsp;&middot;&nbsp;
-      model explains <span id="beta_r2_pct">—</span> of daily variance
+<!-- Card 1: Today's move -->
+<div class="panel-box" style="padding:18px 22px 16px;margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;flex-wrap:wrap;gap:6px">
+    <div class="panel-title" style="font-size:15px">
+      Today&rsquo;s move &nbsp;<span id="dp_date" style="font-family:'IBM Plex Mono',monospace;font-size:0.72rem;font-weight:400;color:var(--text-faint)"></span>
     </div>
+    <div style="font-family:'Fraunces',serif;font-size:1.3rem;font-weight:600" id="dp_audpct">—</div>
   </div>
 
-  <!-- Driver rows -->
-  <div id="beta_rows" style="display:flex;flex-direction:column;gap:14px;margin-bottom:22px">
-
+  <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
     <!-- DXY -->
-    <div class="beta-row" data-driver="dxy" data-unit="pct" data-sign="-1">
-      <div class="beta-label"><span class="dot" style="background:#f05a52"></span>DXY</div>
-      <div class="beta-stat">
-        <span class="beta-val" id="beta_val_dxy">—</span>
-        <span class="beta-badge" id="beta_badge_dxy"></span>
-      </div>
-      <div class="beta-slider-wrap">
-        <input type="range" class="beta-slider" id="beta_sl_dxy"
-               min="-30" max="30" value="0" step="1">
-        <span class="beta-slider-label" id="beta_sllbl_dxy">0.0%</span>
-      </div>
-      <div class="beta-implied">
-        <span class="beta-arrow" id="beta_arr_dxy">→</span>
-        <span class="beta-impl-val" id="beta_impl_dxy">—</span>
-      </div>
+    <div class="dp-row">
+      <div class="dp-label"><span class="dot" style="background:#f05a52"></span>DXY</div>
+      <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_dxy"></div></div>
+      <div class="dp-pct" id="dp_pct_dxy">—</div>
+      <div class="dp-tag" id="dp_lbl_dxy"></div>
     </div>
-
-    <!-- AU-US Spread -->
-    <div class="beta-row" data-driver="spread" data-unit="bp" data-sign="1">
-      <div class="beta-label"><span class="dot" style="background:#4b8ef0"></span>AU&ndash;US 2y</div>
-      <div class="beta-stat">
-        <span class="beta-val" id="beta_val_spread">—</span>
-        <span class="beta-badge" id="beta_badge_spread"></span>
-      </div>
-      <div class="beta-slider-wrap">
-        <input type="range" class="beta-slider" id="beta_sl_spread"
-               min="-20" max="20" value="0" step="1">
-        <span class="beta-slider-label" id="beta_sllbl_spread">0 bp</span>
-      </div>
-      <div class="beta-implied">
-        <span class="beta-arrow" id="beta_arr_spread">→</span>
-        <span class="beta-impl-val" id="beta_impl_spread">—</span>
-      </div>
+    <!-- Spread -->
+    <div class="dp-row">
+      <div class="dp-label"><span class="dot" style="background:#4b8ef0"></span>AU&ndash;US 2y</div>
+      <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_spread"></div></div>
+      <div class="dp-pct" id="dp_pct_spread">—</div>
+      <div class="dp-tag" id="dp_lbl_spread"></div>
     </div>
-
     <!-- S&P 500 -->
-    <div class="beta-row" data-driver="spx" data-unit="pct" data-sign="1">
-      <div class="beta-label"><span class="dot" style="background:#2fcb9a"></span>S&amp;P 500</div>
-      <div class="beta-stat">
-        <span class="beta-val" id="beta_val_spx">—</span>
-        <span class="beta-badge" id="beta_badge_spx"></span>
-      </div>
-      <div class="beta-slider-wrap">
-        <input type="range" class="beta-slider" id="beta_sl_spx"
-               min="-50" max="50" value="0" step="1">
-        <span class="beta-slider-label" id="beta_sllbl_spx">0.0%</span>
-      </div>
-      <div class="beta-implied">
-        <span class="beta-arrow" id="beta_arr_spx">→</span>
-        <span class="beta-impl-val" id="beta_impl_spx">—</span>
-      </div>
+    <div class="dp-row">
+      <div class="dp-label"><span class="dot" style="background:#2fcb9a"></span>S&amp;P 500</div>
+      <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_spx"></div></div>
+      <div class="dp-pct" id="dp_pct_spx">—</div>
+      <div class="dp-tag" id="dp_lbl_spx"></div>
     </div>
-
     <!-- USD/CNY -->
-    <div class="beta-row" data-driver="usdcnh" data-unit="pct" data-sign="-1">
-      <div class="beta-label"><span class="dot" style="background:#c084fc"></span>USD/CNY</div>
-      <div class="beta-stat">
-        <span class="beta-val" id="beta_val_usdcnh">—</span>
-        <span class="beta-badge" id="beta_badge_usdcnh"></span>
-      </div>
-      <div class="beta-slider-wrap">
-        <input type="range" class="beta-slider" id="beta_sl_usdcnh"
-               min="-30" max="30" value="0" step="1">
-        <span class="beta-slider-label" id="beta_sllbl_usdcnh">0.0%</span>
-      </div>
-      <div class="beta-implied">
-        <span class="beta-arrow" id="beta_arr_usdcnh">→</span>
-        <span class="beta-impl-val" id="beta_impl_usdcnh">—</span>
-      </div>
+    <div class="dp-row">
+      <div class="dp-label"><span class="dot" style="background:#c084fc"></span>USD/CNY</div>
+      <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_usdcnh"></div></div>
+      <div class="dp-pct" id="dp_pct_usdcnh">—</div>
+      <div class="dp-tag" id="dp_lbl_usdcnh"></div>
     </div>
-
     <!-- Iron ore -->
-    <div class="beta-row" data-driver="iron" data-unit="pct" data-sign="1">
-      <div class="beta-label"><span class="dot" style="background:#e09438"></span>Iron ore</div>
-      <div class="beta-stat">
-        <span class="beta-val" id="beta_val_iron">—</span>
-        <span class="beta-badge" id="beta_badge_iron"></span>
-      </div>
-      <div class="beta-slider-wrap">
-        <input type="range" class="beta-slider" id="beta_sl_iron"
-               min="-50" max="50" value="0" step="1">
-        <span class="beta-slider-label" id="beta_sllbl_iron">0.0%</span>
-      </div>
-      <div class="beta-implied">
-        <span class="beta-arrow" id="beta_arr_iron">→</span>
-        <span class="beta-impl-val" id="beta_impl_iron">—</span>
-      </div>
+    <div class="dp-row">
+      <div class="dp-label"><span class="dot" style="background:#e09438"></span>Iron ore</div>
+      <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_iron"></div></div>
+      <div class="dp-pct" id="dp_pct_iron">—</div>
+      <div class="dp-tag" id="dp_lbl_iron"></div>
     </div>
-
-  </div><!-- /beta_rows -->
-
-  <!-- Summary bar -->
-  <div id="beta_summary" style="background:rgba(240,179,41,0.05);border:1px solid rgba(240,179,41,0.18);border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:24px;flex-wrap:wrap">
-    <div>
-      <div style="font-size:0.6rem;color:var(--text-faint);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">Current AUD/USD</div>
-      <div id="beta_current" style="font-family:'Fraunces',serif;font-size:1.4rem;font-weight:600;color:var(--text)">—</div>
-    </div>
-    <div style="font-size:1.4rem;color:var(--text-faint)">→</div>
-    <div>
-      <div style="font-size:0.6rem;color:var(--text-faint);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">Net move</div>
-      <div id="beta_net" style="font-family:'Fraunces',serif;font-size:1.4rem;font-weight:600;color:var(--text)">0.00%</div>
-    </div>
-    <div style="font-size:1.4rem;color:var(--text-faint)">→</div>
-    <div>
-      <div style="font-size:0.6rem;color:var(--text-faint);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">Implied AUD/USD</div>
-      <div id="beta_implied_total" style="font-family:'Fraunces',serif;font-size:1.4rem;font-weight:600;color:var(--gold)">—</div>
-    </div>
-    <button id="beta_resetBtn" style="margin-left:auto;font-family:inherit;font-size:11px;letter-spacing:.06em;color:var(--text-faint);background:transparent;border:1px solid var(--panel-edge);padding:6px 14px;border-radius:16px;cursor:pointer">Reset</button>
   </div>
 
+  <div style="display:flex;gap:24px;padding-top:12px;border-top:1px solid var(--panel-edge);font-size:0.72rem;flex-wrap:wrap">
+    <span style="color:var(--text-faint)">Model explained: <b id="dp_explained" style="color:var(--text)">—</b></span>
+    <span style="color:var(--text-faint)">Residual (news/flow): <b id="dp_residual" style="color:var(--text)">—</b></span>
+  </div>
 </div>
-<p class="source" style="margin-top:12px">Rolling OLS: AUD/USD log-returns ~ DXY + AU&ndash;US 2y spread (&Delta;bp, lagged 1d) + S&amp;P 500 + USD/CNY + iron ore · all log-returns except spread · 252d / 60d window · daily data · Yahoo Finance, RBA F2, Alpha Vantage. &sigma; bands are trailing 252d mean &plusmn; std of rolling betas. Fat-tail caveat: &plusmn;2&sigma; breaches occur more often than 1-in-20 for financial data.</p>
+
+<!-- Card 2: Current regime -->
+<div class="panel-box" style="padding:18px 22px 16px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;flex-wrap:wrap;gap:6px">
+    <div class="panel-title" style="font-size:15px">Current regime &nbsp;<span id="dp_window_lbl" style="font-family:'IBM Plex Mono',monospace;font-size:0.72rem;font-weight:400;color:var(--text-faint)">252d OLS</span></div>
+    <div style="font-size:0.68rem;color:var(--text-faint)">R&sup2;&nbsp;=&nbsp;<span id="dp_r2" style="color:var(--text)">—</span></div>
+  </div>
+  <div id="dp_regime_rows" style="display:flex;flex-direction:column;gap:9px"></div>
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--panel-edge);font-size:0.72rem;color:var(--text-faint)">
+    Dominant driver: <b id="dp_dominant" style="color:var(--gold)">—</b>
+  </div>
+</div>
+
+<p class="source" style="margin-top:12px">Rolling OLS: AUD/USD log-returns ~ DXY + AU&ndash;US 2y spread (&Delta;bp, lagged 1d) + S&amp;P 500 + USD/CNY + iron ore &middot; 252d / 60d trailing window &middot; Yahoo Finance, RBA F2, Alpha Vantage. Today&rsquo;s attribution uses 252d betas &times; actual driver moves. &sigma; bands are trailing 252d mean &plusmn; std of rolling betas.</p>
 """
 
-BETA_CSS = """
-/* ── BETA SENSITIVITY PANEL ── */
-.beta-row{display:grid;grid-template-columns:130px 120px 1fr 100px;align-items:center;gap:10px}
-@media(max-width:640px){.beta-row{grid-template-columns:100px 100px 1fr 80px;gap:6px}}
-.beta-label{display:flex;align-items:center;font-size:0.78rem;color:var(--text-dim)}
-.beta-stat{display:flex;align-items:center;gap:7px}
-.beta-val{font-family:'IBM Plex Mono',monospace;font-size:0.85rem;color:var(--text);min-width:58px}
-.beta-badge{font-size:0.58rem;letter-spacing:.06em;padding:2px 7px;border-radius:10px;white-space:nowrap}
-.beta-badge.sig2{background:rgba(240,148,56,0.18);color:var(--amber);border:1px solid rgba(240,148,56,0.35)}
-.beta-badge.sig1{background:rgba(122,146,180,0.12);color:var(--text-faint);border:1px solid rgba(122,146,180,0.25)}
-.beta-badge.nodta{background:rgba(61,82,112,0.15);color:var(--text-faint);font-style:italic}
-.beta-slider-wrap{display:flex;align-items:center;gap:10px}
-.beta-slider{-webkit-appearance:none;appearance:none;width:100%;height:4px;background:var(--panel-edge);border-radius:4px;outline:none;cursor:pointer}
-.beta-slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--gold);border:2px solid var(--ink-2);cursor:grab;box-shadow:0 2px 6px rgba(0,0,0,.5)}
-.beta-slider::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--gold);border:2px solid var(--ink-2);cursor:grab}
-.beta-slider-label{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--gold);min-width:52px;text-align:right}
-.beta-implied{text-align:right}
-.beta-arrow{color:var(--text-faint);margin-right:4px;font-size:0.75rem}
-.beta-impl-val{font-family:'IBM Plex Mono',monospace;font-size:0.82rem}
-.beta-impl-pos{color:#2fcb9a}.beta-impl-neg{color:#f05a52}.beta-impl-zero{color:var(--text-faint)}
-.beta-slider:disabled{opacity:0.3;cursor:not-allowed}
+DRIVER_CSS = """
+/* ── DRIVER ATTRIBUTION PANEL ── */
+.dp-row{display:grid;grid-template-columns:130px 1fr 64px 80px;align-items:center;gap:10px}
+@media(max-width:640px){.dp-row{grid-template-columns:100px 1fr 55px 60px;gap:6px}}
+.dp-label{display:flex;align-items:center;font-size:0.78rem;color:var(--text-dim)}
+.dp-bar-wrap{position:relative;height:6px;background:var(--panel-edge);border-radius:3px;overflow:hidden}
+.dp-bar{position:absolute;top:0;height:100%;border-radius:3px;transition:width .3s,right .3s,left .3s}
+.dp-bar.dp-pos{background:#2fcb9a;left:0}
+.dp-bar.dp-neg{background:#f05a52;right:0}
+.dp-pct{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--text);text-align:right}
+.dp-tag{font-size:0.62rem;color:var(--text-faint)}
+.dp-badge{display:inline-block;font-size:0.57rem;letter-spacing:.05em;padding:1px 6px;border-radius:8px;white-space:nowrap;vertical-align:middle;margin-left:5px}
+.dp-badge.sig2{background:rgba(240,148,56,.18);color:var(--amber);border:1px solid rgba(240,148,56,.35)}
+.dp-badge.sig1{background:rgba(122,146,180,.12);color:var(--text-faint);border:1px solid rgba(122,146,180,.25)}
+.dp-badge.anomaly{background:rgba(240,90,82,.12);color:#f05a52;border:1px solid rgba(240,90,82,.3)}
+.dp-regime-row{display:grid;grid-template-columns:22px 130px 80px 1fr;align-items:center;gap:8px;font-size:0.76rem}
+.dp-regime-rank{color:var(--text-faint);font-size:0.65rem;text-align:center}
+.dp-regime-name{display:flex;align-items:center;color:var(--text-dim)}
+.dp-regime-beta{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--text)}
 """
 
-BETA_INIT_SCRIPT = """<script>
+DRIVER_INIT_SCRIPT = """<script>
 (function() {
-  var DRIVERS = ['dxy','spread','spx','usdcnh','iron'];
-  var UNITS   = {dxy:'pct',spread:'bp',spx:'pct',usdcnh:'pct',iron:'pct'};
+  var DRIVERS      = ['dxy','spread','spx','usdcnh','iron'];
+  var DRIVER_LABEL = {dxy:'DXY',spread:'AU–US Spread',spx:'S&P 500',usdcnh:'USD/CNY',iron:'Iron ore'};
+  var DRIVER_COLOR = {dxy:'#f05a52',spread:'#4b8ef0',spx:'#2fcb9a',usdcnh:'#c084fc',iron:'#e09438'};
+  var DRIVER_SIGN  = {dxy:-1,spread:1,spx:1,usdcnh:-1,iron:1};
   var activeLatest = LATEST_BETAS_252;
-  var currentAUD   = null;
 
-  function setCurrentAUD(v) {
-    currentAUD = v;
-    var el = document.getElementById('beta_current');
-    if (el) el.textContent = v ? v.toFixed(4) : '—';
-  }
+  /* ── TODAY'S MOVE ── */
+  function renderToday() {
+    var a = TODAY_ATTRIBUTION; if (!a) return;
+    var dateEl = document.getElementById('dp_date');
+    if (dateEl) dateEl.textContent = a.date || '';
+    var audEl = document.getElementById('dp_audpct');
+    if (audEl) {
+      var p = a.audusd_pct;
+      audEl.textContent = p !== null && p !== undefined ? (p >= 0 ? '+' : '') + p.toFixed(3) + '%' : '—';
+      audEl.style.color = !p ? 'var(--text)' : (p >= 0 ? '#2fcb9a' : '#f05a52');
+    }
 
-  function betaFlagBadge(name, latest) {
-    var d = latest[name]; if (!d) return null;
-    var b = d.beta, mu = d.mean, u2 = d.u2, l2 = d.l2, u1 = d.u1, l1 = d.l1;
-    if (b === null || b === undefined) return null;
-    if (u2 !== null && (b > u2 || b < l2)) return {cls:'sig2', txt:'outside ±2σ'};
-    if (u1 !== null && (b > u1 || b < l1)) return {cls:'sig1', txt:'near ±1σ'};
-    return null;
-  }
-
-  function renderBetas(latest) {
-    if (!latest || !latest.dxy) return;
-    var r2 = latest.r2;
-    document.getElementById('beta_r2').textContent = r2 !== null && r2 !== undefined ? r2.toFixed(3) : '—';
-    document.getElementById('beta_r2_pct').textContent = r2 !== null && r2 !== undefined ? (r2*100).toFixed(1)+'%' : '—';
+    // bar scale: cap at max(|audusd_pct|, 0.5) so tiny-move days don't overflow
+    var scale = Math.max(Math.abs(a.audusd_pct || 0), 0.5);
 
     DRIVERS.forEach(function(name) {
-      var d = latest[name];
-      var valEl   = document.getElementById('beta_val_'+name);
-      var badgeEl = document.getElementById('beta_badge_'+name);
-      var slEl    = document.getElementById('beta_sl_'+name);
-      if (!valEl) return;
+      var c    = a.contribs && a.contribs[name];
+      var barEl = document.getElementById('dp_bar_' + name);
+      var pctEl = document.getElementById('dp_pct_' + name);
+      var lblEl = document.getElementById('dp_lbl_' + name);
+      if (!barEl) return;
 
-      if (!d || d.beta === null || d.beta === undefined) {
-        valEl.textContent = 'n/a';
-        valEl.style.color = 'var(--text-faint)';
-        badgeEl.textContent = 'no data';
-        badgeEl.className = 'beta-badge nodta';
-        if (slEl) slEl.disabled = true;
+      if (!c) {
+        barEl.style.width = '0'; barEl.className = 'dp-bar';
+        if (pctEl) { pctEl.textContent = '—'; pctEl.style.color = 'var(--text-faint)'; }
+        if (lblEl) { lblEl.textContent = 'no data'; lblEl.style.color = 'var(--text-faint)'; }
         return;
       }
-      slEl && (slEl.disabled = false);
-      valEl.textContent = (d.beta >= 0 ? '+' : '') + d.beta.toFixed(4);
-      valEl.style.color = 'var(--text)';
-      var flag = betaFlagBadge(name, latest);
-      if (flag) {
-        badgeEl.textContent = flag.txt;
-        badgeEl.className = 'beta-badge ' + flag.cls;
+      var pct  = c.pct;
+      var wPct = Math.min(Math.abs(pct) / scale * 100, 100).toFixed(1) + '%';
+      if (pct >= 0) {
+        barEl.className = 'dp-bar dp-pos'; barEl.style.width = wPct; barEl.style.right = '';
       } else {
-        badgeEl.textContent = '';
-        badgeEl.className = 'beta-badge';
+        barEl.className = 'dp-bar dp-neg'; barEl.style.width = wPct; barEl.style.left = '';
+      }
+      if (pctEl) {
+        pctEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(3) + '%';
+        pctEl.style.color = pct === 0 ? 'var(--text-faint)' : (pct > 0 ? '#2fcb9a' : '#f05a52');
+      }
+      if (lblEl) {
+        lblEl.textContent = Math.abs(pct) < 0.001 ? 'flat' : (pct > 0 ? 'support' : 'headwind');
+        lblEl.style.color = 'var(--text-faint)';
       }
     });
-    recalc();
-  }
 
-  function recalc() {
-    var latest = activeLatest;
-    if (!latest) return;
-    var totalLR = 0;
-    DRIVERS.forEach(function(name) {
-      var slEl  = document.getElementById('beta_sl_'+name);
-      var lblEl = document.getElementById('beta_sllbl_'+name);
-      var arrEl = document.getElementById('beta_arr_'+name);
-      var impEl = document.getElementById('beta_impl_'+name);
-      if (!slEl || slEl.disabled) { if(impEl){impEl.textContent='—';impEl.className='beta-impl-val beta-impl-zero';} return; }
-
-      var raw = +slEl.value;
-      var unit = UNITS[name];
-      var labelTxt = unit === 'bp' ? raw+' bp' : (raw/10).toFixed(1)+'%';
-      if (lblEl) lblEl.textContent = labelTxt;
-
-      var d = latest[name];
-      if (!d || d.beta === null || d.beta === undefined) { if(impEl){impEl.textContent='—';impEl.className='beta-impl-val beta-impl-zero';} return; }
-
-      // beta is AUD/USD log-return per unit of driver log-return (or per 1bp for spread)
-      var driverMove = unit === 'bp' ? raw : raw / 10 / 100;  // convert slider units
-      var lr = d.beta * driverMove;
-      totalLR += lr;
-
-      var pctMove = (Math.exp(lr) - 1) * 100;
-      if (impEl) {
-        if (Math.abs(pctMove) < 0.001) {
-          impEl.textContent = '—'; impEl.className = 'beta-impl-val beta-impl-zero';
-        } else {
-          impEl.textContent = (pctMove >= 0 ? '+' : '') + pctMove.toFixed(3) + '%';
-          impEl.className = 'beta-impl-val ' + (pctMove >= 0 ? 'beta-impl-pos' : 'beta-impl-neg');
-        }
-      }
-      if (arrEl) arrEl.style.color = Math.abs(pctMove) < 0.001 ? 'var(--text-faint)' : (pctMove >= 0 ? '#2fcb9a' : '#f05a52');
-    });
-
-    var netPct = (Math.exp(totalLR) - 1) * 100;
-    var netEl = document.getElementById('beta_net');
-    if (netEl) {
-      netEl.textContent = (netPct >= 0 ? '+' : '') + netPct.toFixed(3) + '%';
-      netEl.style.color = Math.abs(netPct) < 0.001 ? 'var(--text)' : (netPct >= 0 ? '#2fcb9a' : '#f05a52');
+    var expEl = document.getElementById('dp_explained');
+    var resEl = document.getElementById('dp_residual');
+    if (expEl) {
+      var ep = a.explained_pct;
+      expEl.textContent = ep !== null ? (ep >= 0 ? '+' : '') + ep.toFixed(3) + '%' : '—';
+      expEl.style.color = !ep ? 'var(--text)' : (ep >= 0 ? '#2fcb9a' : '#f05a52');
     }
-    var impTot = document.getElementById('beta_implied_total');
-    if (impTot && currentAUD) {
-      var implied = currentAUD * Math.exp(totalLR);
-      impTot.textContent = implied.toFixed(4);
-      impTot.style.color = Math.abs(netPct) < 0.001 ? 'var(--gold)' :
-        (netPct >= 0 ? '#2fcb9a' : '#f05a52');
-    } else if (impTot) { impTot.textContent = '—'; }
+    if (resEl) {
+      var rp = a.residual_pct;
+      resEl.textContent = rp !== null ? (rp >= 0 ? '+' : '') + rp.toFixed(3) + '%' : '—';
+      resEl.style.color = !rp ? 'var(--text)' : (rp >= 0 ? '#2fcb9a' : '#f05a52');
+    }
   }
 
-  // Wire sliders
-  DRIVERS.forEach(function(name) {
-    var slEl = document.getElementById('beta_sl_'+name);
-    if (slEl) slEl.addEventListener('input', recalc);
-  });
+  /* ── CURRENT REGIME ── */
+  function betaBadge(name, d) {
+    if (!d || d.beta === null || d.beta === undefined) return '';
+    var b = d.beta, exp = DRIVER_SIGN[name];
+    if (d.u2 !== null && (b > d.u2 || b < d.l2))
+      return '<span class="dp-badge sig2">outside \xb12σ</span>';
+    if (d.u1 !== null && (b > d.u1 || b < d.l1))
+      return '<span class="dp-badge sig1">near \xb11σ</span>';
+    if (Math.abs(b) > 0.01 && ((b > 0 ? 1 : -1) !== exp))
+      return '<span class="dp-badge anomaly">sign anomaly</span>';
+    return '';
+  }
 
-  // Reset button
-  var resetBtn = document.getElementById('beta_resetBtn');
-  if (resetBtn) resetBtn.addEventListener('click', function() {
-    DRIVERS.forEach(function(name) {
-      var sl = document.getElementById('beta_sl_'+name);
-      if (sl) { sl.value = 0; sl.disabled = false; }
-      var lbl = document.getElementById('beta_sllbl_'+name);
-      if (lbl) lbl.textContent = UNITS[name]==='bp' ? '0 bp' : '0.0%';
-      var imp = document.getElementById('beta_impl_'+name);
-      if (imp) { imp.textContent='—'; imp.className='beta-impl-val beta-impl-zero'; }
-      var arr = document.getElementById('beta_arr_'+name);
-      if (arr) arr.style.color='var(--text-faint)';
+  function renderRegime(latest) {
+    if (!latest) return;
+    var r2El = document.getElementById('dp_r2');
+    if (r2El) r2El.textContent = latest.r2 !== null ? latest.r2.toFixed(3) : '—';
+    var wEl = document.getElementById('dp_window_lbl');
+    if (wEl) wEl.textContent = (activeLatest === LATEST_BETAS_252 ? '252d' : '60d') + ' OLS';
+
+    // sort by |beta| descending
+    var ranked = DRIVERS.slice().sort(function(a, b) {
+      var ba = latest[a] && latest[a].beta !== null ? Math.abs(latest[a].beta) : -1;
+      var bb = latest[b] && latest[b].beta !== null ? Math.abs(latest[b].beta) : -1;
+      return bb - ba;
     });
-    var netEl = document.getElementById('beta_net');
-    if (netEl) { netEl.textContent='0.00%'; netEl.style.color='var(--text)'; }
-    var imp = document.getElementById('beta_implied_total');
-    if (imp && currentAUD) { imp.textContent=currentAUD.toFixed(4); imp.style.color='var(--gold)'; }
-  });
 
-  // Window toggle
-  document.getElementById('beta_toggleBtns').addEventListener('click', function(e) {
+    var container = document.getElementById('dp_regime_rows');
+    if (!container) return;
+    var html = '';
+    ranked.forEach(function(name, idx) {
+      var d = latest[name];
+      var betaTxt = (!d || d.beta === null) ? 'n/a' : (d.beta >= 0 ? '+' : '') + d.beta.toFixed(4);
+      var badge   = (!d || d.beta === null) ? '<span class="dp-badge" style="color:var(--text-faint)">no data</span>' : betaBadge(name, d);
+      html += '<div class="dp-regime-row">'
+        + '<div class="dp-regime-rank">' + (idx + 1) + '</div>'
+        + '<div class="dp-regime-name"><span class="dot" style="background:' + DRIVER_COLOR[name] + '"></span>' + DRIVER_LABEL[name] + '</div>'
+        + '<div class="dp-regime-beta">β ' + betaTxt + '</div>'
+        + '<div>' + badge + '</div>'
+        + '</div>';
+    });
+    container.innerHTML = html;
+
+    var domEl = document.getElementById('dp_dominant');
+    if (domEl) {
+      var top = ranked[0];
+      var td  = latest[top];
+      if (td && td.beta !== null) {
+        var regime = {dxy:'USD-DRIVEN',spread:'RATES-DRIVEN',spx:'RISK-DRIVEN',usdcnh:'CNH-DRIVEN',iron:'COMMODITIES-DRIVEN'};
+        domEl.textContent = regime[top] || top.toUpperCase();
+      } else {
+        domEl.textContent = 'UNCLEAR';
+      }
+    }
+  }
+
+  /* ── TOGGLE ── */
+  var toggleEl = document.getElementById('dp_toggleBtns');
+  if (toggleEl) toggleEl.addEventListener('click', function(e) {
     var btn = e.target.closest('[data-w]'); if (!btn) return;
     this.querySelectorAll('.preset').forEach(function(b){b.classList.remove('active');});
     btn.classList.add('active');
     activeLatest = btn.dataset.w === '252' ? LATEST_BETAS_252 : LATEST_BETAS_60;
-    renderBetas(activeLatest);
+    renderRegime(activeLatest);
   });
 
-  // Init — expose setCurrentAUD for inline call after AUD/USD value is known
-  window._betaSetAUD = setCurrentAUD;
-  renderBetas(activeLatest);
+  renderToday();
+  renderRegime(activeLatest);
 })();
 </script>"""
 
@@ -2127,7 +2091,7 @@ body {{
   gap: 8px;
 }}
 {CHART_CSS}
-{BETA_CSS}
+{DRIVER_CSS}
 </style>
 </head>
 <body>
@@ -2283,16 +2247,15 @@ body {{
 </div>
 
 
-<!-- ─── BETA SENSITIVITY ─── -->
+<!-- ─── WHAT'S DRIVING AUD/USD ─── -->
 <div class="section-header" style="margin-top:36px">
-  <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">BETA SENSITIVITY</span>
+  <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">WHAT&rsquo;S DRIVING AUD/USD</span>
   <div class="sec-line"></div>
 </div>
 
 <div style="background:var(--surface);border:1px solid var(--panel-edge);border-radius:12px;padding:22px 26px 18px">
-  {BETA_PANEL_HTML}
+  {DRIVER_PANEL_HTML}
 </div>
-<script>if(window._betaSetAUD) _betaSetAUD({data['audusd']:.4f});</script>
 
 
 <!-- ─── 02 RATE DIFFERENTIALS ─── -->
@@ -2598,7 +2561,7 @@ body {{
 {CORR_INIT_SCRIPT}
 
 {beta_data_script}
-{BETA_INIT_SCRIPT}
+{DRIVER_INIT_SCRIPT}
 
 </body>
 </html>
