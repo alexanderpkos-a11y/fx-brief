@@ -11,6 +11,10 @@ on:
       - 'generate_brief.py'
       - 'planning/fx_dashboard.html'
 
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 permissions:
   contents: write
 

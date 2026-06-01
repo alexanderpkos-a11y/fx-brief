@@ -1180,19 +1180,19 @@ body {{
   <!-- Asset Manager -->
   <div class="cot-card am-card">
     <div class="cot-card-label">Asset Manager Net {badge('CFTC')}</div>
-    <div class="cot-net-value red">+{data['am_net']:,}</div>
+    <div class="cot-net-value {'red' if data['am_net'] < 0 else 'green'}">{'+'if data['am_net']>=0 else ''}{data['am_net']:,}</div>
     <div class="cot-wow-row">
-      <span class="red">▼ {abs(data['am_net_chg']):,} WoW</span>
-      <span class="cot-prev">prev +{data['am_net_prev']:,}</span>
+      <span class="{'green' if data['am_net_chg'] >= 0 else 'red'}">{'▲' if data['am_net_chg'] >= 0 else '▼'} {abs(data['am_net_chg']):,} WoW</span>
+      <span class="cot-prev">prev {'+' if data['am_net_prev'] >= 0 else ''}{data['am_net_prev']:,}</span>
     </div>
   </div>
   <!-- Leveraged Funds -->
   <div class="cot-card lev-card">
     <div class="cot-card-label">Leveraged Funds Net {badge('CFTC')}</div>
-    <div class="cot-net-value green">+{data['lev_net']:,}</div>
+    <div class="cot-net-value {'red' if data['lev_net'] < 0 else 'green'}">{'+'if data['lev_net']>=0 else ''}{data['lev_net']:,}</div>
     <div class="cot-wow-row">
-      <span class="red">▼ {abs(data['lev_net_chg']):,} WoW</span>
-      <span class="cot-prev">prev +{data['lev_net_prev']:,}</span>
+      <span class="{'green' if data['lev_net_chg'] >= 0 else 'red'}">{'▲' if data['lev_net_chg'] >= 0 else '▼'} {abs(data['lev_net_chg']):,} WoW</span>
+      <span class="cot-prev">prev {'+' if data['lev_net_prev'] >= 0 else ''}{data['lev_net_prev']:,}</span>
     </div>
   </div>
 </div>
@@ -1200,27 +1200,27 @@ body {{
 <div class="cot-compare-row">
   <div class="cot-compare-item">
     <span class="cot-compare-label">AM Net (current)</span>
-    <span class="gold">+{data['am_net']:,}</span>
+    <span class="gold">{'+'if data['am_net']>=0 else ''}{data['am_net']:,}</span>
   </div>
   <div class="cot-compare-item">
     <span class="cot-compare-label">AM Net (prior week)</span>
-    <span class="dim-text">+{data['am_net_prev']:,}</span>
+    <span class="dim-text">{'+'if data['am_net_prev']>=0 else ''}{data['am_net_prev']:,}</span>
   </div>
   <div class="cot-compare-item">
     <span class="cot-compare-label">AM WoW Δ</span>
-    <span class="red">▼ {abs(data['am_net_chg']):,}</span>
+    <span class="{'green' if data['am_net_chg'] >= 0 else 'red'}">{'▲' if data['am_net_chg'] >= 0 else '▼'} {abs(data['am_net_chg']):,}</span>
   </div>
   <div class="cot-compare-item">
     <span class="cot-compare-label">LF Net (current)</span>
-    <span class="green">+{data['lev_net']:,}</span>
+    <span class="{'red' if data['lev_net'] < 0 else 'green'}">{'+'if data['lev_net']>=0 else ''}{data['lev_net']:,}</span>
   </div>
   <div class="cot-compare-item">
     <span class="cot-compare-label">LF Net (prior week)</span>
-    <span class="dim-text">+{data['lev_net_prev']:,}</span>
+    <span class="dim-text">{'+'if data['lev_net_prev']>=0 else ''}{data['lev_net_prev']:,}</span>
   </div>
   <div class="cot-compare-item">
     <span class="cot-compare-label">LF WoW Δ</span>
-    <span class="red">▼ {abs(data['lev_net_chg']):,}</span>
+    <span class="{'green' if data['lev_net_chg'] >= 0 else 'red'}">{'▲' if data['lev_net_chg'] >= 0 else '▼'} {abs(data['lev_net_chg']):,}</span>
   </div>
 </div>
 
@@ -1434,7 +1434,6 @@ body {{
     <a href="https://www.rba.gov.au/statistics/tables/xls/f02hist.xls" target="_blank">[RBA] Reserve Bank of Australia — AU bond yields (F2 table)</a>
     <a href="https://www.alphavantage.co" target="_blank">[AV] Alpha Vantage — US 2-year Treasury yield</a>
     <a href="https://www.cftc.gov/dea/futures/deacmesf.htm" target="_blank">[CFTC] CFTC TFF Report — AUD futures positioning ({cot_date})</a>
-    <a href="#" style="color:var(--text-faint)">[SCR] Screenshot / manual — Iron ore spot (data gap)</a>
   </div>
 </footer>
 
