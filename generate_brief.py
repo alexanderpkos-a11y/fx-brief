@@ -753,41 +753,11 @@ _lb252j = json.dumps(_latest_betas_252, separators=(',', ':'))
 _lb60j  = json.dumps(_latest_betas_60,  separators=(',', ':'))
 _lb1mj  = json.dumps(_latest_betas_1m,  separators=(',', ':'))
 
-# Today's move attribution: actual driver returns × 252d rolling betas
-_last_aud_lr = float(_beta_y[-1]) if len(_beta_y) else 0.0
-_last_X_row  = _beta_X[-1, 1:] if len(_beta_X) else np.zeros(5)
-_last_date   = _beta_dates[-1] if _beta_dates else ''
-_today_contribs = {}
-for _i, _name in enumerate(_BETA_DRIVERS):
-    _bi = (_latest_betas_252.get(_name) or {}).get('beta')
-    _xi = float(_last_X_row[_i]) if np.isfinite(_last_X_row[_i]) else None
-    if _bi is not None and _xi is not None:
-        _lr = _bi * _xi
-        _today_contribs[_name] = {
-            'lr':         round(_lr, 6),
-            'pct':        round((math.exp(_lr) - 1) * 100, 4),
-            'driver_pct': round(_xi * 100, 4) if _name != 'spread' else round(_xi, 4),
-        }
-    else:
-        _today_contribs[_name] = None
-_exp_lr = sum(v['lr'] for v in _today_contribs.values() if v)
-_resid  = _last_aud_lr - _exp_lr
-today_attribution = {
-    'date':         _last_date,
-    'audusd_lr':    round(_last_aud_lr, 6),
-    'audusd_pct':   round((math.exp(_last_aud_lr) - 1) * 100, 4),
-    'contribs':     _today_contribs,
-    'explained_pct': round((math.exp(_exp_lr) - 1) * 100, 4),
-    'residual_pct': round((math.exp(_resid) - 1) * 100, 4),
-}
-_attribj = json.dumps(today_attribution, separators=(',', ':'))
-
 beta_data_script = (
     f'<script>\n'
     f'var LATEST_BETAS_1M={_lb1mj};\n'
     f'var LATEST_BETAS_60={_lb60j};\n'
     f'var LATEST_BETAS_252={_lb252j};\n'
-    f'var TODAY_ATTRIBUTION={_attribj};\n'
     f'</script>'
 )
 
@@ -1376,51 +1346,7 @@ CORR_INIT_SCRIPT = """<script>
 # DRIVER ATTRIBUTION PANEL  (replaces slider-based beta sensitivity panel)
 # ---------------------------------------------------------------------------
 DRIVER_PANEL_HTML = """
-<div style="font-size:0.68rem;color:var(--text-faint);margin-bottom:10px">Rolling OLS &nbsp;&middot;&nbsp; what moved AUD/USD and what drives it now</div>
-
-<!-- Card 1: Today's move -->
-<div class="panel-box" style="padding:14px 18px 12px;margin-bottom:10px">
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;flex-wrap:wrap;gap:4px">
-    <div style="font-size:0.65rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint)">
-      Latest week &nbsp;<span id="dp_date"></span>
-    </div>
-    <div style="font-family:'Fraunces',serif;font-size:1.15rem;font-weight:600" id="dp_audpct">—</div>
-  </div>
-
-  <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:12px">
-    <div class="dp-row">
-      <div class="dp-label"><span class="dot" style="background:#4b8ef0"></span>AU&ndash;US 2y</div>
-      <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_spread"></div></div>
-      <div class="dp-pct" id="dp_pct_spread">—</div>
-      <div class="dp-tag" id="dp_lbl_spread"></div>
-    </div>
-    <div class="dp-row">
-      <div class="dp-label"><span class="dot" style="background:#2fcb9a"></span>S&amp;P 500</div>
-      <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_spx"></div></div>
-      <div class="dp-pct" id="dp_pct_spx">—</div>
-      <div class="dp-tag" id="dp_lbl_spx"></div>
-    </div>
-    <div class="dp-row">
-      <div class="dp-label"><span class="dot" style="background:#c084fc"></span>USD/CNY</div>
-      <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_usdcnh"></div></div>
-      <div class="dp-pct" id="dp_pct_usdcnh">—</div>
-      <div class="dp-tag" id="dp_lbl_usdcnh"></div>
-    </div>
-    <div class="dp-row">
-      <div class="dp-label"><span class="dot" style="background:#e09438"></span>Iron ore</div>
-      <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_iron"></div></div>
-      <div class="dp-pct" id="dp_pct_iron">—</div>
-      <div class="dp-tag" id="dp_lbl_iron"></div>
-    </div>
-  </div>
-
-  <div style="display:flex;gap:20px;padding-top:10px;border-top:1px solid var(--panel-edge);font-size:0.68rem;flex-wrap:wrap">
-    <span style="color:var(--text-faint)">Model explained: <b id="dp_explained" style="color:var(--text)">—</b></span>
-    <span style="color:var(--text-faint)">Residual (news/flow): <b id="dp_residual" style="color:var(--text)">—</b></span>
-  </div>
-</div>
-
-<!-- Card 2: Current regime — three windows side by side -->
+<!-- Current regime — three windows side by side -->
 <div class="panel-box" style="padding:14px 18px 12px">
   <div style="font-size:0.65rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint);margin-bottom:10px">Current regime &nbsp;&middot;&nbsp; sensitivity ranked by |&beta;|</div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
@@ -1455,16 +1381,7 @@ DRIVER_PANEL_HTML = """
 """
 
 DRIVER_CSS = """
-/* ── DRIVER ATTRIBUTION PANEL ── */
-.dp-row{display:grid;grid-template-columns:130px 1fr 64px 80px;align-items:center;gap:10px}
-@media(max-width:640px){.dp-row{grid-template-columns:100px 1fr 55px 60px;gap:6px}}
-.dp-label{display:flex;align-items:center;font-size:0.78rem;color:var(--text-dim)}
-.dp-bar-wrap{position:relative;height:6px;background:var(--panel-edge);border-radius:3px;overflow:hidden}
-.dp-bar{position:absolute;top:0;height:100%;border-radius:3px;transition:width .3s,right .3s,left .3s}
-.dp-bar.dp-pos{background:#2fcb9a;left:0}
-.dp-bar.dp-neg{background:#f05a52;right:0}
-.dp-pct{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--text);text-align:right}
-.dp-tag{font-size:0.62rem;color:var(--text-faint)}
+/* ── DRIVER REGIME PANEL ── */
 .dp-regime-row{display:grid;grid-template-columns:18px 130px 76px 1fr;align-items:center;gap:6px;font-size:0.73rem}
 .dp-regime-rank{color:var(--text-faint);font-size:0.62rem;text-align:center}
 .dp-regime-name{display:flex;align-items:center;color:var(--text-dim)}
@@ -1477,65 +1394,6 @@ DRIVER_INIT_SCRIPT = """<script>
   var DRIVER_LABEL = {spread:'AU–US Spread',spx:'S&P 500',usdcnh:'USD/CNY',iron:'Iron ore'};
   var DRIVER_COLOR = {spread:'#4b8ef0',spx:'#2fcb9a',usdcnh:'#c084fc',iron:'#e09438'};
   var DRIVER_SIGN  = {spread:1,spx:1,usdcnh:-1,iron:1};
-  /* ── TODAY'S MOVE ── */
-  function renderToday() {
-    var a = TODAY_ATTRIBUTION; if (!a) return;
-    var dateEl = document.getElementById('dp_date');
-    if (dateEl) dateEl.textContent = a.date || '';
-    var audEl = document.getElementById('dp_audpct');
-    if (audEl) {
-      var p = a.audusd_pct;
-      audEl.textContent = p !== null && p !== undefined ? (p >= 0 ? '+' : '') + p.toFixed(3) + '%' : '—';
-      audEl.style.color = !p ? 'var(--text)' : (p >= 0 ? '#2fcb9a' : '#f05a52');
-    }
-
-    // bar scale: cap at max(|audusd_pct|, 0.5) so tiny-move days don't overflow
-    var scale = Math.max(Math.abs(a.audusd_pct || 0), 0.5);
-
-    DRIVERS.forEach(function(name) {
-      var c    = a.contribs && a.contribs[name];
-      var barEl = document.getElementById('dp_bar_' + name);
-      var pctEl = document.getElementById('dp_pct_' + name);
-      var lblEl = document.getElementById('dp_lbl_' + name);
-      if (!barEl) return;
-
-      if (!c) {
-        barEl.style.width = '0'; barEl.className = 'dp-bar';
-        if (pctEl) { pctEl.textContent = '—'; pctEl.style.color = 'var(--text-faint)'; }
-        if (lblEl) { lblEl.textContent = 'no data'; lblEl.style.color = 'var(--text-faint)'; }
-        return;
-      }
-      var pct  = c.pct;
-      var wPct = Math.min(Math.abs(pct) / scale * 100, 100).toFixed(1) + '%';
-      if (pct >= 0) {
-        barEl.className = 'dp-bar dp-pos'; barEl.style.width = wPct; barEl.style.right = '';
-      } else {
-        barEl.className = 'dp-bar dp-neg'; barEl.style.width = wPct; barEl.style.left = '';
-      }
-      if (pctEl) {
-        pctEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(3) + '%';
-        pctEl.style.color = pct === 0 ? 'var(--text-faint)' : (pct > 0 ? '#2fcb9a' : '#f05a52');
-      }
-      if (lblEl) {
-        lblEl.textContent = Math.abs(pct) < 0.001 ? 'flat' : (pct > 0 ? 'support' : 'headwind');
-        lblEl.style.color = 'var(--text-faint)';
-      }
-    });
-
-    var expEl = document.getElementById('dp_explained');
-    var resEl = document.getElementById('dp_residual');
-    if (expEl) {
-      var ep = a.explained_pct;
-      expEl.textContent = ep !== null ? (ep >= 0 ? '+' : '') + ep.toFixed(3) + '%' : '—';
-      expEl.style.color = !ep ? 'var(--text)' : (ep >= 0 ? '#2fcb9a' : '#f05a52');
-    }
-    if (resEl) {
-      var rp = a.residual_pct;
-      resEl.textContent = rp !== null ? (rp >= 0 ? '+' : '') + rp.toFixed(3) + '%' : '—';
-      resEl.style.color = !rp ? 'var(--text)' : (rp >= 0 ? '#2fcb9a' : '#f05a52');
-    }
-  }
-
   /* ── CURRENT REGIME ── */
 
   function renderRegime(latest, containerId, r2Id) {
@@ -1594,7 +1452,6 @@ DRIVER_INIT_SCRIPT = """<script>
     }
   }
 
-  renderToday();
   renderRegime(LATEST_BETAS_1M,  'dp_regime_1m', 'dp_r2_1m');
   renderRegime(LATEST_BETAS_60,  'dp_regime_1y', 'dp_r2_1y');
   renderRegime(LATEST_BETAS_252, 'dp_regime_2y', 'dp_r2_2y');
