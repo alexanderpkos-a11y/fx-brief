@@ -1571,7 +1571,7 @@ DRIVER_INIT_SCRIPT = """<script>
         + '<span style="display:flex;align-items:center;gap:4px;font-size:0.7rem;color:var(--text-dim)">'
         + '<span class="dot" style="background:' + DRIVER_COLOR[name] + ';width:7px;height:7px;flex-shrink:0"></span>'
         + DRIVER_LABEL[name] + '</span>'
-        + '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:0.67rem;color:var(--text);text-align:right;white-space:nowrap">β ' + betaTxt + '</span>'
+        + '<span style="font-family:\\'IBM Plex Mono\\',monospace;font-size:0.67rem;color:var(--text);text-align:right;white-space:nowrap">β ' + betaTxt + '</span>'
         + '</div>';
       if (badge) html += '<div style="margin-bottom:3px;padding-left:18px">' + badge + '</div>';
     });
