@@ -1323,10 +1323,8 @@ CORR_INIT_SCRIPT = """<script>
 # ---------------------------------------------------------------------------
 DRIVER_PANEL_HTML = """
 <!-- Toggle row -->
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
-  <div style="font-size:0.72rem;color:var(--text-dim)">
-    Rolling OLS &nbsp;&middot;&nbsp; what moved AUD/USD and what drives it now
-  </div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+  <div style="font-size:0.68rem;color:var(--text-faint)">Rolling OLS &nbsp;&middot;&nbsp; what moved AUD/USD and what drives it now</div>
   <div id="dp_toggleBtns" class="presets" style="margin-top:0">
     <button class="preset active" data-w="252">252d</button>
     <button class="preset" data-w="60">60d</button>
@@ -1334,44 +1332,39 @@ DRIVER_PANEL_HTML = """
 </div>
 
 <!-- Card 1: Today's move -->
-<div class="panel-box" style="padding:18px 22px 16px;margin-bottom:14px">
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;flex-wrap:wrap;gap:6px">
-    <div class="panel-title" style="font-size:15px">
-      Today&rsquo;s move &nbsp;<span id="dp_date" style="font-family:'IBM Plex Mono',monospace;font-size:0.72rem;font-weight:400;color:var(--text-faint)"></span>
+<div class="panel-box" style="padding:14px 18px 12px;margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;flex-wrap:wrap;gap:4px">
+    <div style="font-size:0.65rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint)">
+      Today&rsquo;s move &nbsp;<span id="dp_date"></span>
     </div>
-    <div style="font-family:'Fraunces',serif;font-size:1.3rem;font-weight:600" id="dp_audpct">—</div>
+    <div style="font-family:'Fraunces',serif;font-size:1.15rem;font-weight:600" id="dp_audpct">—</div>
   </div>
 
-  <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
-    <!-- DXY -->
+  <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:12px">
     <div class="dp-row">
       <div class="dp-label"><span class="dot" style="background:#f05a52"></span>DXY</div>
       <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_dxy"></div></div>
       <div class="dp-pct" id="dp_pct_dxy">—</div>
       <div class="dp-tag" id="dp_lbl_dxy"></div>
     </div>
-    <!-- Spread -->
     <div class="dp-row">
       <div class="dp-label"><span class="dot" style="background:#4b8ef0"></span>AU&ndash;US 2y</div>
       <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_spread"></div></div>
       <div class="dp-pct" id="dp_pct_spread">—</div>
       <div class="dp-tag" id="dp_lbl_spread"></div>
     </div>
-    <!-- S&P 500 -->
     <div class="dp-row">
       <div class="dp-label"><span class="dot" style="background:#2fcb9a"></span>S&amp;P 500</div>
       <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_spx"></div></div>
       <div class="dp-pct" id="dp_pct_spx">—</div>
       <div class="dp-tag" id="dp_lbl_spx"></div>
     </div>
-    <!-- USD/CNY -->
     <div class="dp-row">
       <div class="dp-label"><span class="dot" style="background:#c084fc"></span>USD/CNY</div>
       <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_usdcnh"></div></div>
       <div class="dp-pct" id="dp_pct_usdcnh">—</div>
       <div class="dp-tag" id="dp_lbl_usdcnh"></div>
     </div>
-    <!-- Iron ore -->
     <div class="dp-row">
       <div class="dp-label"><span class="dot" style="background:#e09438"></span>Iron ore</div>
       <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_iron"></div></div>
@@ -1380,25 +1373,25 @@ DRIVER_PANEL_HTML = """
     </div>
   </div>
 
-  <div style="display:flex;gap:24px;padding-top:12px;border-top:1px solid var(--panel-edge);font-size:0.72rem;flex-wrap:wrap">
+  <div style="display:flex;gap:20px;padding-top:10px;border-top:1px solid var(--panel-edge);font-size:0.68rem;flex-wrap:wrap">
     <span style="color:var(--text-faint)">Model explained: <b id="dp_explained" style="color:var(--text)">—</b></span>
     <span style="color:var(--text-faint)">Residual (news/flow): <b id="dp_residual" style="color:var(--text)">—</b></span>
   </div>
 </div>
 
 <!-- Card 2: Current regime -->
-<div class="panel-box" style="padding:18px 22px 16px">
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;flex-wrap:wrap;gap:6px">
-    <div class="panel-title" style="font-size:15px">Current regime &nbsp;<span id="dp_window_lbl" style="font-family:'IBM Plex Mono',monospace;font-size:0.72rem;font-weight:400;color:var(--text-faint)">252d OLS</span></div>
-    <div style="font-size:0.68rem;color:var(--text-faint)">R&sup2;&nbsp;=&nbsp;<span id="dp_r2" style="color:var(--text)">—</span></div>
+<div class="panel-box" style="padding:14px 18px 12px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;flex-wrap:wrap;gap:4px">
+    <div style="font-size:0.65rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint)">Current regime &nbsp;<span id="dp_window_lbl">252d OLS</span></div>
+    <div style="font-size:0.65rem;color:var(--text-faint)">R&sup2;&nbsp;=&nbsp;<span id="dp_r2" style="color:var(--text)">—</span></div>
   </div>
-  <div id="dp_regime_rows" style="display:flex;flex-direction:column;gap:9px"></div>
-  <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--panel-edge);font-size:0.72rem;color:var(--text-faint)">
+  <div id="dp_regime_rows" style="display:flex;flex-direction:column;gap:6px"></div>
+  <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--panel-edge);font-size:0.68rem;color:var(--text-faint)">
     Dominant driver: <b id="dp_dominant" style="color:var(--gold)">—</b>
   </div>
 </div>
 
-<p class="source" style="margin-top:12px">Rolling OLS: AUD/USD log-returns ~ DXY + AU&ndash;US 2y spread (&Delta;bp, lagged 1d) + S&amp;P 500 + USD/CNY + iron ore &middot; 252d / 60d trailing window &middot; Yahoo Finance, RBA F2, Alpha Vantage. Today&rsquo;s attribution uses 252d betas &times; actual driver moves. &sigma; bands are trailing 252d mean &plusmn; std of rolling betas.</p>
+<p class="source" style="margin-top:10px">Rolling OLS: AUD/USD log-returns ~ DXY + AU&ndash;US 2y spread (&Delta;bp, lagged 1d) + S&amp;P 500 + USD/CNY + iron ore &middot; 252d / 60d trailing window &middot; Yahoo Finance, RBA F2, Alpha Vantage. Today&rsquo;s attribution uses 252d betas &times; actual driver moves. &sigma; bands are trailing 252d mean &plusmn; std of rolling betas.</p>
 """
 
 DRIVER_CSS = """
@@ -1416,10 +1409,10 @@ DRIVER_CSS = """
 .dp-badge.sig2{background:rgba(240,148,56,.18);color:var(--amber);border:1px solid rgba(240,148,56,.35)}
 .dp-badge.sig1{background:rgba(122,146,180,.12);color:var(--text-faint);border:1px solid rgba(122,146,180,.25)}
 .dp-badge.anomaly{background:rgba(240,90,82,.12);color:#f05a52;border:1px solid rgba(240,90,82,.3)}
-.dp-regime-row{display:grid;grid-template-columns:22px 130px 80px 1fr;align-items:center;gap:8px;font-size:0.76rem}
-.dp-regime-rank{color:var(--text-faint);font-size:0.65rem;text-align:center}
+.dp-regime-row{display:grid;grid-template-columns:18px 130px 76px 1fr;align-items:center;gap:6px;font-size:0.73rem}
+.dp-regime-rank{color:var(--text-faint);font-size:0.62rem;text-align:center}
 .dp-regime-name{display:flex;align-items:center;color:var(--text-dim)}
-.dp-regime-beta{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--text)}
+.dp-regime-beta{font-family:'IBM Plex Mono',monospace;font-size:0.73rem;color:var(--text)}
 """
 
 DRIVER_INIT_SCRIPT = """<script>
@@ -2253,7 +2246,7 @@ body {{
   <div class="sec-line"></div>
 </div>
 
-<div style="background:var(--surface);border:1px solid var(--panel-edge);border-radius:12px;padding:22px 26px 18px">
+<div style="background:var(--surface);border:1px solid var(--panel-edge);border-radius:12px;padding:16px 20px 14px">
   {DRIVER_PANEL_HTML}
 </div>
 
