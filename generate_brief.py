@@ -1150,8 +1150,7 @@ body {{
     <div class="mini-card-detail">
       Cash Rate Target: <strong>{f"{rba_cash_rate:.2f}%" if rba_cash_rate else "4.35%"}</strong><br>
       Last move: &minus;25 bp &nbsp;&bull;&nbsp; 20 May 2026<br>
-      Next meeting: <strong>16&ndash;17 Jun 2026</strong><br>
-      {f'Jun cut probability: <strong class="gold">~{rba_cut_prob}%</strong> <span class="dim-text">(−25 bp, from 1m BABs)</span>' if rba_cut_prob is not None else 'Market pricing: <span class="pending-field">pending next meeting</span>'}
+      Next meeting: <strong>16&ndash;17 Jun 2026</strong>
     </div>
   </div>
   <!-- FOMC Card -->
@@ -1405,7 +1404,7 @@ body {{
     <tr>
       <td><span class="event-date">16–17 Jun</span></td>
       <td><span class="event-name">RBA Board Meeting</span></td>
-      <td class="event-detail">Rate decision; press conference. Market ~60% pricing another &minus;25 bp cut</td>
+      <td class="event-detail">Rate decision; press conference. Market pricing unavailable — requires ASX data subscription.</td>
       <td><span class="impact-badge impact-high">HIGH</span></td>
       <td class="dim-text">Primary AUD driver</td>
     </tr>
