@@ -649,9 +649,9 @@ body {
       <span class="tile-label">DXY Index</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value red">99.054</div>
+    <div class="tile-value red">99.038</div>
     <div class="tile-bottom">
-      <span class="red">▲ +0.15%</span>
+      <span class="red">▲ +0.13%</span>
       <span class="tile-ref">prev 98.910</span>
     </div>
   </div>
@@ -687,9 +687,9 @@ body {
       <span class="tile-label">AUD / JPY</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value green">114.566</div>
+    <div class="tile-value green">114.580</div>
     <div class="tile-bottom">
-      <span class="green">▲ +0.44%</span>
+      <span class="green">▲ +0.46%</span>
       <span class="tile-ref">prev 114.060</span>
     </div>
   </div>
@@ -700,7 +700,7 @@ body {
       <span class="tile-label">USD / CNH</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value mono dim-text">6.7667</div>
+    <div class="tile-value mono dim-text">6.7660</div>
     <div class="tile-bottom">
       <span class="data-gap">prev close n/a</span>
     </div>
@@ -747,7 +747,7 @@ body {
     <div class="attr-row">
       <span class="attr-label">USD/CNY (CNH proxy)</span>
       <div class="attr-track">
-        <div class="attr-fill negative" style="width:65.0%"></div>
+        <div class="attr-fill negative" style="width:65.1%"></div>
         <span class="attr-marker-60d" style="left:18.2%" title="60d: -0.18"></span>
       </div>
       <span class="attr-val">-0.65</span>
@@ -756,7 +756,7 @@ body {
     <div class="attr-row">
       <span class="attr-label">DXY</span>
       <div class="attr-track">
-        <div class="attr-fill anomaly" style="width:32.8%"></div>
+        <div class="attr-fill anomaly" style="width:32.6%"></div>
         <span class="attr-marker-60d" style="left:15.5%" title="60d: +0.16"></span>
       </div>
       <span class="attr-val">+0.33</span>
@@ -906,12 +906,6 @@ body {
 
   <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:12px">
     <div class="dp-row">
-      <div class="dp-label"><span class="dot" style="background:#f05a52"></span>DXY</div>
-      <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_dxy"></div></div>
-      <div class="dp-pct" id="dp_pct_dxy">—</div>
-      <div class="dp-tag" id="dp_lbl_dxy"></div>
-    </div>
-    <div class="dp-row">
       <div class="dp-label"><span class="dot" style="background:#4b8ef0"></span>AU&ndash;US 2y</div>
       <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_spread"></div></div>
       <div class="dp-pct" id="dp_pct_spread">—</div>
@@ -955,7 +949,7 @@ body {
   </div>
 </div>
 
-<p class="source" style="margin-top:10px">Rolling OLS: AUD/USD log-returns ~ DXY + AU&ndash;US 2y spread (&Delta;bp, lagged 1d) + S&amp;P 500 + USD/CNY + iron ore &middot; 252d / 60d trailing window &middot; Yahoo Finance, RBA F2, Alpha Vantage. Today&rsquo;s attribution uses 252d betas &times; actual driver moves. &sigma; bands are trailing 252d mean &plusmn; std of rolling betas.</p>
+<p class="source" style="margin-top:10px">Rolling OLS: AUD/USD log-returns ~ AU&ndash;US 2y spread (&Delta;bp, lagged 1d) + S&amp;P 500 + USD/CNY + iron ore &middot; 252d / 60d trailing window &middot; DXY excluded (collinear with USD/CNY) &middot; Yahoo Finance, RBA F2, Alpha Vantage. Today&rsquo;s attribution uses 252d betas &times; actual driver moves. &sigma; bands are trailing 252d mean &plusmn; std of rolling betas.</p>
 
 </div>
 
@@ -1197,9 +1191,9 @@ body {
     <tr>
       <td>Copper</td>
       <td>HG=F (front month)</td>
-      <td>6.443</td>
+      <td>6.452</td>
       <td>6.359</td>
-      <td class="chg-positive">▲ +1.31%</td>
+      <td class="chg-positive">▲ +1.46%</td>
       <td><span class="badge badge-yf">YF</span></td>
     </tr>
     <tr>
@@ -1213,7 +1207,7 @@ body {
     <tr>
       <td>USD / CNH</td>
       <td>Offshore RMB</td>
-      <td>6.7667</td>
+      <td>6.7660</td>
       <td class="data-gap">prev n/a</td>
       <td class="data-gap">n/a</td>
       <td><span class="badge badge-yf">YF</span></td>
@@ -1757,16 +1751,16 @@ var CORR60_SERIES=[{"date":"2016-08-25","audusd":0.761,"aud_mean":0.7514,"aud_u1
 </script>
 
 <script>
-var LATEST_BETAS_252={"date":"2026-05-29","r2":0.1052,"dxy":{"beta":0.08871,"mean":-0.14166,"u1":-0.10714,"l1":-0.17617,"u2":-0.07262,"l2":-0.21069},"spread":{"beta":null,"mean":null,"u1":null,"l1":null,"u2":null,"l2":null},"spx":{"beta":0.17736,"mean":0.01886,"u1":0.03983,"l1":-0.00211,"u2":0.0608,"l2":-0.02308},"usdcnh":{"beta":-0.37171,"mean":-0.58089,"u1":-0.47746,"l1":-0.68433,"u2":-0.37402,"l2":-0.78777},"iron":{"beta":0.08834,"mean":0.12301,"u1":0.20169,"l1":0.04433,"u2":0.28036,"l2":-0.03435}};
-var LATEST_BETAS_60={"date":"2026-05-29","r2":0.2448,"dxy":{"beta":0.55353,"mean":0.04014,"u1":0.23902,"l1":-0.15875,"u2":0.43791,"l2":-0.35764},"spread":{"beta":null,"mean":null,"u1":null,"l1":null,"u2":null,"l2":null},"spx":{"beta":0.37511,"mean":0.16285,"u1":0.34689,"l1":-0.02118,"u2":0.53092,"l2":-0.20522},"usdcnh":{"beta":-0.29303,"mean":-0.50347,"u1":0.00659,"l1":-1.01352,"u2":0.51664,"l2":-1.52358},"iron":{"beta":0.05931,"mean":0.16294,"u1":0.37619,"l1":-0.05032,"u2":0.58945,"l2":-0.26358}};
-var TODAY_ATTRIBUTION={"date":"2026-05-29","audusd_lr":0.004337,"audusd_pct":0.4346,"contribs":{"dxy":{"lr":-9.9e-05,"pct":-0.0099,"driver_pct":-0.1111},"spread":null,"spx":{"lr":0.000385,"pct":0.0385,"driver_pct":0.217},"usdcnh":{"lr":-3.8e-05,"pct":-0.0038,"driver_pct":0.0103},"iron":{"lr":-0.000178,"pct":-0.0178,"driver_pct":-0.202}},"explained_pct":0.007,"residual_pct":0.4276};
+var LATEST_BETAS_252={"date":"2026-05-29","r2":0.1036,"spread":{"beta":null,"mean":null,"u1":null,"l1":null,"u2":null,"l2":null},"spx":{"beta":0.18456,"mean":0.01785,"u1":0.04549,"l1":-0.00978,"u2":0.07312,"l2":-0.03742},"usdcnh":{"beta":-0.35857,"mean":-0.58247,"u1":-0.47545,"l1":-0.68949,"u2":-0.36843,"l2":-0.7965},"iron":{"beta":0.09034,"mean":0.12817,"u1":0.20893,"l1":0.04741,"u2":0.28968,"l2":-0.03334}};
+var LATEST_BETAS_60={"date":"2026-05-29","r2":0.1647,"spread":{"beta":null,"mean":null,"u1":null,"l1":null,"u2":null,"l2":null},"spx":{"beta":0.30043,"mean":0.15844,"u1":0.33742,"l1":-0.02054,"u2":0.5164,"l2":-0.19952},"usdcnh":{"beta":-0.32841,"mean":-0.5103,"u1":0.01483,"l1":-1.03543,"u2":0.53996,"l2":-1.56056},"iron":{"beta":0.06758,"mean":0.16934,"u1":0.39413,"l1":-0.05545,"u2":0.61892,"l2":-0.28023}};
+var TODAY_ATTRIBUTION={"date":"2026-05-29","audusd_lr":0.004337,"audusd_pct":0.4346,"contribs":{"spread":null,"spx":{"lr":0.0004,"pct":0.0401,"driver_pct":0.217},"usdcnh":{"lr":-3.7e-05,"pct":-0.0037,"driver_pct":0.0103},"iron":{"lr":-0.000182,"pct":-0.0182,"driver_pct":-0.202}},"explained_pct":0.0181,"residual_pct":0.4164};
 </script>
 <script>
 (function() {
-  var DRIVERS      = ['dxy','spread','spx','usdcnh','iron'];
-  var DRIVER_LABEL = {dxy:'DXY',spread:'AU–US Spread',spx:'S&P 500',usdcnh:'USD/CNY',iron:'Iron ore'};
-  var DRIVER_COLOR = {dxy:'#f05a52',spread:'#4b8ef0',spx:'#2fcb9a',usdcnh:'#c084fc',iron:'#e09438'};
-  var DRIVER_SIGN  = {dxy:-1,spread:1,spx:1,usdcnh:-1,iron:1};
+  var DRIVERS      = ['spread','spx','usdcnh','iron'];
+  var DRIVER_LABEL = {spread:'AU–US Spread',spx:'S&P 500',usdcnh:'USD/CNY',iron:'Iron ore'};
+  var DRIVER_COLOR = {spread:'#4b8ef0',spx:'#2fcb9a',usdcnh:'#c084fc',iron:'#e09438'};
+  var DRIVER_SIGN  = {spread:1,spx:1,usdcnh:-1,iron:1};
   var activeLatest = LATEST_BETAS_252;
 
   /* ── TODAY'S MOVE ── */
@@ -1876,7 +1870,7 @@ var TODAY_ATTRIBUTION={"date":"2026-05-29","audusd_lr":0.004337,"audusd_pct":0.4
       var top = ranked[0];
       var td  = latest[top];
       if (td && td.beta !== null) {
-        var regime = {dxy:'USD-DRIVEN',spread:'RATES-DRIVEN',spx:'RISK-DRIVEN',usdcnh:'CNH-DRIVEN',iron:'COMMODITIES-DRIVEN'};
+        var regime = {spread:'RATES-DRIVEN',spx:'RISK-DRIVEN',usdcnh:'CNH-DRIVEN',iron:'COMMODITIES-DRIVEN'};
         domEl.textContent = regime[top] || top.toUpperCase();
       } else {
         domEl.textContent = 'UNCLEAR';

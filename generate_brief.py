@@ -281,26 +281,25 @@ PRINT_DIAGNOSTICS = os.environ.get('PRINT_DIAGNOSTICS', '').lower() in ('1', 'tr
 
 def _to_returns_df(aud_hist, driver_hists, spread_lag=1):
     """Align all series, compute log returns / first diffs, return (dates, y, X).
-    X columns (in order): intercept, dxy, spread, spx, usdcnh, iron.
+    X columns (in order): intercept, spread, spx, usdcnh, iron.
     spread uses first differences; all others use log returns.
     spread_lag shifts spread forward by N days so today's regression uses the
-    prior day's spread value (conservative: AU yields close ~4h before NYSE)."""
+    prior day's spread value (conservative: AU yields close ~4h before NYSE).
+    DXY excluded: collinear with USD/CNY, causes sign anomaly and inflated VIF."""
     spread_hist = driver_hists.get('spread', {})
-    dxy_hist    = driver_hists.get('dxy', {})
     spx_hist    = driver_hists.get('spx', {})
     usdcnh_hist = driver_hists.get('usdcnh', {})
     iron_hist   = driver_hists.get('iron_ore', {})
 
     # Build return series as dicts
-    aud_r   = dict(_log_returns(aud_hist))
-    dxy_r   = dict(_log_returns(dxy_hist))
-    spx_r   = dict(_log_returns(spx_hist))
+    aud_r    = dict(_log_returns(aud_hist))
+    spx_r    = dict(_log_returns(spx_hist))
     usdcnh_r = dict(_log_returns(usdcnh_hist))
-    iron_r  = dict(_log_returns(iron_hist))
+    iron_r   = dict(_log_returns(iron_hist))
     spread_d = dict(_first_diffs(spread_hist))   # first diff in bp
 
     # Collect all return dates and apply spread lag
-    all_dates = sorted(set(aud_r) & set(dxy_r) & set(spx_r) & set(usdcnh_r))
+    all_dates = sorted(set(aud_r) & set(spx_r) & set(usdcnh_r))
     # iron is allowed to be missing (starts 2013) — use NaN when absent
     spread_dates = sorted(spread_d)
     # lagged spread: for each date, use the spread diff from `spread_lag` earlier trading days
@@ -313,18 +312,16 @@ def _to_returns_df(aud_hist, driver_hists, spread_lag=1):
 
     dates_out, y_out, X_rows = [], [], []
     for d in all_dates:
-        y = aud_r.get(d)
-        xd = dxy_r.get(d)
+        y  = aud_r.get(d)
         xs = spread_lagged.get(d)   # may be None if spread missing
         xp = spx_r.get(d)
         xc = usdcnh_r.get(d)
         xi = iron_r.get(d)          # may be None pre-2013
-        if y is None or xd is None or xp is None or xc is None:
+        if y is None or xp is None or xc is None:
             continue  # core series must be present
         dates_out.append(d)
         y_out.append(y)
         X_rows.append([1.0,
-                        xd,
                         xs if xs is not None else float('nan'),
                         xp,
                         xc,
@@ -622,7 +619,7 @@ corr_data_script = f'<script>\nvar CORR20_SERIES={_c20j};\nvar CORR60_SERIES={_c
 # ---------------------------------------------------------------------------
 # ROLLING OLS BETAS
 # ---------------------------------------------------------------------------
-_BETA_DRIVERS = ['dxy', 'spread', 'spx', 'usdcnh', 'iron']
+_BETA_DRIVERS = ['spread', 'spx', 'usdcnh', 'iron']
 _BETA_COL_NAMES = ['intercept'] + _BETA_DRIVERS
 
 print('Computing rolling OLS betas (252d window)…')
@@ -1342,12 +1339,6 @@ DRIVER_PANEL_HTML = """
 
   <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:12px">
     <div class="dp-row">
-      <div class="dp-label"><span class="dot" style="background:#f05a52"></span>DXY</div>
-      <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_dxy"></div></div>
-      <div class="dp-pct" id="dp_pct_dxy">—</div>
-      <div class="dp-tag" id="dp_lbl_dxy"></div>
-    </div>
-    <div class="dp-row">
       <div class="dp-label"><span class="dot" style="background:#4b8ef0"></span>AU&ndash;US 2y</div>
       <div class="dp-bar-wrap"><div class="dp-bar" id="dp_bar_spread"></div></div>
       <div class="dp-pct" id="dp_pct_spread">—</div>
@@ -1391,7 +1382,7 @@ DRIVER_PANEL_HTML = """
   </div>
 </div>
 
-<p class="source" style="margin-top:10px">Rolling OLS: AUD/USD log-returns ~ DXY + AU&ndash;US 2y spread (&Delta;bp, lagged 1d) + S&amp;P 500 + USD/CNY + iron ore &middot; 252d / 60d trailing window &middot; Yahoo Finance, RBA F2, Alpha Vantage. Today&rsquo;s attribution uses 252d betas &times; actual driver moves. &sigma; bands are trailing 252d mean &plusmn; std of rolling betas.</p>
+<p class="source" style="margin-top:10px">Rolling OLS: AUD/USD log-returns ~ AU&ndash;US 2y spread (&Delta;bp, lagged 1d) + S&amp;P 500 + USD/CNY + iron ore &middot; 252d / 60d trailing window &middot; DXY excluded (collinear with USD/CNY) &middot; Yahoo Finance, RBA F2, Alpha Vantage. Today&rsquo;s attribution uses 252d betas &times; actual driver moves. &sigma; bands are trailing 252d mean &plusmn; std of rolling betas.</p>
 """
 
 DRIVER_CSS = """
@@ -1417,10 +1408,10 @@ DRIVER_CSS = """
 
 DRIVER_INIT_SCRIPT = """<script>
 (function() {
-  var DRIVERS      = ['dxy','spread','spx','usdcnh','iron'];
-  var DRIVER_LABEL = {dxy:'DXY',spread:'AU–US Spread',spx:'S&P 500',usdcnh:'USD/CNY',iron:'Iron ore'};
-  var DRIVER_COLOR = {dxy:'#f05a52',spread:'#4b8ef0',spx:'#2fcb9a',usdcnh:'#c084fc',iron:'#e09438'};
-  var DRIVER_SIGN  = {dxy:-1,spread:1,spx:1,usdcnh:-1,iron:1};
+  var DRIVERS      = ['spread','spx','usdcnh','iron'];
+  var DRIVER_LABEL = {spread:'AU–US Spread',spx:'S&P 500',usdcnh:'USD/CNY',iron:'Iron ore'};
+  var DRIVER_COLOR = {spread:'#4b8ef0',spx:'#2fcb9a',usdcnh:'#c084fc',iron:'#e09438'};
+  var DRIVER_SIGN  = {spread:1,spx:1,usdcnh:-1,iron:1};
   var activeLatest = LATEST_BETAS_252;
 
   /* ── TODAY'S MOVE ── */
@@ -1530,7 +1521,7 @@ DRIVER_INIT_SCRIPT = """<script>
       var top = ranked[0];
       var td  = latest[top];
       if (td && td.beta !== null) {
-        var regime = {dxy:'USD-DRIVEN',spread:'RATES-DRIVEN',spx:'RISK-DRIVEN',usdcnh:'CNH-DRIVEN',iron:'COMMODITIES-DRIVEN'};
+        var regime = {spread:'RATES-DRIVEN',spx:'RISK-DRIVEN',usdcnh:'CNH-DRIVEN',iron:'COMMODITIES-DRIVEN'};
         domEl.textContent = regime[top] || top.toUpperCase();
       } else {
         domEl.textContent = 'UNCLEAR';
