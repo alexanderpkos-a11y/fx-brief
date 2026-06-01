@@ -279,46 +279,45 @@ def _compute_rolling_corr_series(aud_hist, driver_hists, use_diffs, window=20, s
 # ---------------------------------------------------------------------------
 PRINT_DIAGNOSTICS = os.environ.get('PRINT_DIAGNOSTICS', '').lower() in ('1', 'true', 'yes')
 
-def _to_returns_df(aud_hist, driver_hists, spread_lag=1):
-    """Align all series, compute log returns / first diffs, return (dates, y, X).
+def _week_end_hist(hist_dict):
+    """Downsample daily {date: value} to one entry per ISO week (last trading day)."""
+    by_week = {}
+    for d in sorted(hist_dict.keys()):
+        dt = datetime.strptime(d, '%Y-%m-%d')
+        yw = dt.strftime('%G-%V')  # ISO year-week
+        by_week[yw] = (d, hist_dict[d])
+    return {d: v for _, (d, v) in sorted(by_week.items())}
+
+def _to_returns_df(aud_hist, driver_hists):
+    """Align all series at weekly frequency, return (dates, y, X).
     X columns (in order): intercept, spread, spx, usdcnh, iron.
-    spread uses first differences; all others use log returns.
-    spread_lag shifts spread forward by N days so today's regression uses the
-    prior day's spread value (conservative: AU yields close ~4h before NYSE).
-    DXY excluded: collinear with USD/CNY, causes sign anomaly and inflated VIF."""
+    Prices sampled at last trading day of each ISO week; log returns computed
+    week-over-week. Spread uses weekly first differences (bp).
+    DXY excluded: collinear with USD/CNY, inflates VIF and causes sign anomaly."""
     spread_hist = driver_hists.get('spread', {})
     spx_hist    = driver_hists.get('spx', {})
     usdcnh_hist = driver_hists.get('usdcnh', {})
     iron_hist   = driver_hists.get('iron_ore', {})
 
-    # Build return series as dicts
-    aud_r    = dict(_log_returns(aud_hist))
-    spx_r    = dict(_log_returns(spx_hist))
-    usdcnh_r = dict(_log_returns(usdcnh_hist))
-    iron_r   = dict(_log_returns(iron_hist))
-    spread_d = dict(_first_diffs(spread_hist))   # first diff in bp
+    # Downsample to end-of-week then compute weekly returns / first diffs
+    aud_r    = dict(_log_returns(_week_end_hist(aud_hist)))
+    spx_r    = dict(_log_returns(_week_end_hist(spx_hist)))
+    usdcnh_r = dict(_log_returns(_week_end_hist(usdcnh_hist)))
+    iron_r   = dict(_log_returns(_week_end_hist(iron_hist)))
+    spread_d = dict(_first_diffs(_week_end_hist(spread_hist)))  # weekly Δbp
 
-    # Collect all return dates and apply spread lag
     all_dates = sorted(set(aud_r) & set(spx_r) & set(usdcnh_r))
-    # iron is allowed to be missing (starts 2013) — use NaN when absent
-    spread_dates = sorted(spread_d)
-    # lagged spread: for each date, use the spread diff from `spread_lag` earlier trading days
-    spread_lagged = {}
-    for i, d in enumerate(spread_dates):
-        if spread_lag == 0:
-            spread_lagged[d] = spread_d[d]
-        elif i >= spread_lag:
-            spread_lagged[d] = spread_d[spread_dates[i - spread_lag]]
+    # iron allowed to be missing pre-2013 — filled with NaN
 
     dates_out, y_out, X_rows = [], [], []
     for d in all_dates:
         y  = aud_r.get(d)
-        xs = spread_lagged.get(d)   # may be None if spread missing
+        xs = spread_d.get(d)   # may be None if spread missing
         xp = spx_r.get(d)
         xc = usdcnh_r.get(d)
-        xi = iron_r.get(d)          # may be None pre-2013
+        xi = iron_r.get(d)     # may be None pre-2013
         if y is None or xp is None or xc is None:
-            continue  # core series must be present
+            continue
         dates_out.append(d)
         y_out.append(y)
         X_rows.append([1.0,
@@ -622,10 +621,10 @@ corr_data_script = f'<script>\nvar CORR20_SERIES={_c20j};\nvar CORR60_SERIES={_c
 _BETA_DRIVERS = ['spread', 'spx', 'usdcnh', 'iron']
 _BETA_COL_NAMES = ['intercept'] + _BETA_DRIVERS
 
-print('Computing rolling OLS betas (252d window)…')
+print('Computing rolling OLS betas (weekly returns)…')
 _beta_dates, _beta_y, _beta_X = _to_returns_df(
-    _hist_results.get('audusd', {}), _driver_hists, spread_lag=1)
-print(f'  {len(_beta_dates)} aligned return-days after differencing')
+    _hist_results.get('audusd', {}), _driver_hists)
+print(f'  {len(_beta_dates)} aligned weekly return-obs')
 
 # Drop columns that are entirely NaN (e.g. spread when AV key absent locally)
 _col_finite = [np.any(np.isfinite(_beta_X[:, j])) for j in range(_beta_X.shape[1])]
@@ -639,9 +638,9 @@ if _dropped:
 if PRINT_DIAGNOSTICS:
     _static_ols_diagnostics(_beta_y, _beta_X_active, _active_col_names)
 
-_betas_252_raw, _r2_252 = _rolling_ols_betas(_beta_y, _beta_X_active, window=252)
-_betas_60_raw,  _r2_60  = _rolling_ols_betas(_beta_y, _beta_X_active, window=60)
-print(f'  252d window: {int(np.isfinite(_r2_252).sum())} valid rows  |  60d: {int(np.isfinite(_r2_60).sum())} valid rows')
+_betas_252_raw, _r2_252 = _rolling_ols_betas(_beta_y, _beta_X_active, window=104)  # 2Y weekly
+_betas_60_raw,  _r2_60  = _rolling_ols_betas(_beta_y, _beta_X_active, window=52)   # 1Y weekly
+print(f'  2Y window: {int(np.isfinite(_r2_252).sum())} valid rows  |  1Y: {int(np.isfinite(_r2_60).sum())} valid rows')
 
 # Reconstruct full-width beta arrays (NaN for dropped columns) so downstream code is consistent
 def _expand_betas(betas_raw, active_names, all_names):
@@ -662,9 +661,9 @@ _driver_col_idx = {n: i+1 for i, n in enumerate(_BETA_DRIVERS)}  # +1 for interc
 _betas_drv_252 = _betas_252[:, 1:]  # columns 1-5 = drivers
 _betas_drv_60  = _betas_60[:, 1:]
 
-_beta_series_252 = _add_beta_bands(_beta_dates, _betas_drv_252, _r2_252, _BETA_DRIVERS, sample_every=5)
-_beta_series_60  = _add_beta_bands(_beta_dates, _betas_drv_60,  _r2_60,  _BETA_DRIVERS, sample_every=5)
-print(f'  Beta series: {len(_beta_series_252)} weekly records (252d)  |  {len(_beta_series_60)} (60d)')
+_beta_series_252 = _add_beta_bands(_beta_dates, _betas_drv_252, _r2_252, _BETA_DRIVERS, sample_every=1, band_window=52)
+_beta_series_60  = _add_beta_bands(_beta_dates, _betas_drv_60,  _r2_60,  _BETA_DRIVERS, sample_every=1, band_window=52)
+print(f'  Beta series: {len(_beta_series_252)} records (2Y)  |  {len(_beta_series_60)} (1Y)')
 
 # Latest betas (most recent row with at least one non-NaN driver) — used by sensitivity panel
 def _latest_valid(series_list, names):
@@ -1323,8 +1322,8 @@ DRIVER_PANEL_HTML = """
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
   <div style="font-size:0.68rem;color:var(--text-faint)">Rolling OLS &nbsp;&middot;&nbsp; what moved AUD/USD and what drives it now</div>
   <div id="dp_toggleBtns" class="presets" style="margin-top:0">
-    <button class="preset active" data-w="252">252d</button>
-    <button class="preset" data-w="60">60d</button>
+    <button class="preset active" data-w="104">2Y</button>
+    <button class="preset" data-w="52">1Y</button>
   </div>
 </div>
 
@@ -1332,7 +1331,7 @@ DRIVER_PANEL_HTML = """
 <div class="panel-box" style="padding:14px 18px 12px;margin-bottom:10px">
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;flex-wrap:wrap;gap:4px">
     <div style="font-size:0.65rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint)">
-      Today&rsquo;s move &nbsp;<span id="dp_date"></span>
+      Latest week &nbsp;<span id="dp_date"></span>
     </div>
     <div style="font-family:'Fraunces',serif;font-size:1.15rem;font-weight:600" id="dp_audpct">—</div>
   </div>
@@ -1382,7 +1381,7 @@ DRIVER_PANEL_HTML = """
   </div>
 </div>
 
-<p class="source" style="margin-top:10px">Rolling OLS: AUD/USD log-returns ~ AU&ndash;US 2y spread (&Delta;bp, lagged 1d) + S&amp;P 500 + USD/CNY + iron ore &middot; 252d / 60d trailing window &middot; DXY excluded (collinear with USD/CNY) &middot; Yahoo Finance, RBA F2, Alpha Vantage. Today&rsquo;s attribution uses 252d betas &times; actual driver moves. &sigma; bands are trailing 252d mean &plusmn; std of rolling betas.</p>
+<p class="source" style="margin-top:10px">Rolling OLS: AUD/USD weekly log-returns ~ AU&ndash;US 2y spread (&Delta;bp) + S&amp;P 500 + USD/CNY + iron ore &middot; 2Y / 1Y trailing window (weekly data) &middot; DXY excluded (collinear with USD/CNY) &middot; Yahoo Finance, RBA F2, Alpha Vantage. Latest week&rsquo;s attribution uses 2Y betas &times; actual driver moves. &sigma; bands are trailing 1Y mean &plusmn; std of rolling betas.</p>
 """
 
 DRIVER_CSS = """
@@ -1491,7 +1490,7 @@ DRIVER_INIT_SCRIPT = """<script>
     var r2El = document.getElementById('dp_r2');
     if (r2El) r2El.textContent = latest.r2 !== null ? latest.r2.toFixed(3) : '—';
     var wEl = document.getElementById('dp_window_lbl');
-    if (wEl) wEl.textContent = (activeLatest === LATEST_BETAS_252 ? '252d' : '60d') + ' OLS';
+    if (wEl) wEl.textContent = (activeLatest === LATEST_BETAS_252 ? '2Y' : '1Y') + ' OLS';
 
     // sort by |beta| descending
     var ranked = DRIVERS.slice().sort(function(a, b) {
@@ -1535,7 +1534,7 @@ DRIVER_INIT_SCRIPT = """<script>
     var btn = e.target.closest('[data-w]'); if (!btn) return;
     this.querySelectorAll('.preset').forEach(function(b){b.classList.remove('active');});
     btn.classList.add('active');
-    activeLatest = btn.dataset.w === '252' ? LATEST_BETAS_252 : LATEST_BETAS_60;
+    activeLatest = btn.dataset.w === '104' ? LATEST_BETAS_252 : LATEST_BETAS_60;
     renderRegime(activeLatest);
   });
 
