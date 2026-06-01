@@ -10,6 +10,7 @@ import subprocess
 import json
 import csv
 import io
+import math
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 AV_API_KEY = os.environ.get('AV_API_KEY', '')  # set via GitHub Secret or local env
@@ -48,23 +49,52 @@ def _yf(ticker, days=7):
         print(f'  [WARN] YF {ticker}: {e}')
     return None, None, None
 
+def _yf_history(ticker, range_str='4mo'):
+    """Fetch ~4 months of daily close history from Yahoo Finance.
+    Returns {date_str: float}. Empty dict on failure."""
+    try:
+        raw = _curl_get(
+            f'https://query1.finance.yahoo.com/v8/finance/chart/'
+            f'{ticker}?interval=1d&range={range_str}'
+        )
+        d = json.loads(raw)
+        res = d['chart']['result'][0]
+        return {
+            datetime.fromtimestamp(ts).strftime('%Y-%m-%d'): c
+            for ts, c in zip(res['timestamp'],
+                              res['indicators']['quote'][0]['close'])
+            if c is not None
+        }
+    except Exception as e:
+        print(f'  [WARN] YF history {ticker}: {e}')
+    return {}
+
 def _fetch_us2y_av():
-    """Alpha Vantage US 2y Treasury yield (weekly). Returns (rate_float, date_str)."""
+    """Alpha Vantage US 2y Treasury yield (daily). Returns (rate_float, date_str, hist_dict)."""
     try:
         raw = _curl_get(
             f'https://www.alphavantage.co/query?function=TREASURY_YIELD'
-            f'&interval=weekly&maturity=2year&apikey={AV_API_KEY}'
+            f'&interval=daily&maturity=2year&apikey={AV_API_KEY}'
         )
         series = json.loads(raw).get('data', [])
         if series:
-            return float(series[0]['value']), series[0]['date']
+            rate = float(series[0]['value'])
+            date_str = series[0]['date']
+            hist = {}
+            for pt in series[:120]:
+                try:
+                    hist[pt['date']] = float(pt['value'])
+                except (ValueError, KeyError):
+                    pass
+            return rate, date_str, hist
     except Exception as e:
         print(f'  [WARN] Alpha Vantage US2y: {e}')
-    return None, None
+    return None, None, {}
 
 def _fetch_rba_f2():
     """RBA F2 – AU 2y and 10y bond yields.
-    Returns (au2y, au2y_prev, au10y, au10y_prev, date_str)."""
+    Returns (au2y, au2y_prev, au10y, au10y_prev, date_str, au2y_hist).
+    au2y_hist is {date_str: float} for the last 120 daily rows."""
     try:
         raw = _curl_get('https://www.rba.gov.au/statistics/tables/csv/f2-data.csv', timeout=25)
         rows = list(csv.reader(io.StringIO(raw)))
@@ -72,10 +102,17 @@ def _fetch_rba_f2():
                      if r and r[0] and r[0][0:1].isdigit() and len(r) >= 5]
         if len(data_rows) >= 2:
             last, prev = data_rows[-1], data_rows[-2]
-            return float(last[1]), float(prev[1]), float(last[4]), float(prev[4]), last[0]
+            hist = {}
+            for r in data_rows[-120:]:
+                try:
+                    dt = datetime.strptime(r[0], '%d-%b-%Y').strftime('%Y-%m-%d')
+                    hist[dt] = float(r[1])
+                except (ValueError, IndexError):
+                    pass
+            return float(last[1]), float(prev[1]), float(last[4]), float(prev[4]), last[0], hist
     except Exception as e:
         print(f'  [WARN] RBA F2: {e}')
-    return None, None, None, None, None
+    return None, None, None, None, None, {}
 
 def _fetch_rba_f1():
     """RBA F1 – cash rate + 1m/3m BABs → implied cut probability.
@@ -129,6 +166,152 @@ def _fetch_cot():
     return None
 
 # ---------------------------------------------------------------------------
+# CORRELATION HELPERS
+# ---------------------------------------------------------------------------
+def _log_returns(hist_dict):
+    """Log returns from sorted {date: price} dict. Returns list of (date, ret)."""
+    dates = sorted(hist_dict)
+    out = []
+    for i in range(1, len(dates)):
+        p0, p1 = hist_dict[dates[i-1]], hist_dict[dates[i]]
+        if p0 and p1 and p0 > 0 and p1 > 0:
+            out.append((dates[i], math.log(p1 / p0)))
+    return out
+
+def _first_diffs(hist_dict):
+    """First differences from sorted {date: value} dict. Returns list of (date, diff)."""
+    dates = sorted(hist_dict)
+    out = []
+    for i in range(1, len(dates)):
+        v0, v1 = hist_dict[dates[i-1]], hist_dict[dates[i]]
+        if v0 is not None and v1 is not None:
+            out.append((dates[i], v1 - v0))
+    return out
+
+def _pearson(xs, ys):
+    n = len(xs)
+    if n < 2:
+        return None
+    mx = sum(xs) / n;  my = sum(ys) / n
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    dx = math.sqrt(sum((x - mx)**2 for x in xs))
+    dy = math.sqrt(sum((y - my)**2 for y in ys))
+    return (num / (dx * dy)) if dx and dy else None
+
+def compute_correlations(aud_hist, driver_hists, use_diffs, windows=(20, 60), min_obs_frac=0.75):
+    """
+    aud_hist: {date: price}
+    driver_hists: {name: {date: value}}
+    use_diffs: set of driver names that use first differences (not log returns)
+    Returns: {name: {window: (corr_or_None, n_obs)}}
+    """
+    aud_by_date = dict(_log_returns(aud_hist))
+    results = {}
+    for name, hist in driver_hists.items():
+        drv_by_date = dict(_first_diffs(hist) if name in use_diffs else _log_returns(hist))
+        common = sorted(set(aud_by_date) & set(drv_by_date))
+        results[name] = {}
+        for w in windows:
+            min_obs = round(w * min_obs_frac)
+            tail = common[-w:] if len(common) >= w else common
+            n = len(tail)
+            if n < min_obs:
+                results[name][w] = (None, n)
+            else:
+                xs = [aud_by_date[d] for d in tail]
+                ys = [drv_by_date[d] for d in tail]
+                results[name][w] = (_pearson(xs, ys), n)
+    return results
+
+# ---------------------------------------------------------------------------
+# DRIVER ATTRIBUTION RENDERER
+# ---------------------------------------------------------------------------
+_DRIVER_LABELS = {
+    'spread':   'AU–US 2y spread',
+    'iron_ore': 'Iron ore (TIO=F)',
+    'spx':      'S&P 500',
+    'usdcnh':   'USD/CNY (CNH proxy)',
+    'dxy':      'DXY',
+}
+_DRIVER_EXPECTED_SIGN = {'spread': 1, 'iron_ore': 1, 'spx': 1, 'usdcnh': -1, 'dxy': -1}
+_DRIVER_HEADLINE = {
+    'spread':   'RATES-DRIVEN',
+    'iron_ore': 'CHINA / COMMODITIES-DRIVEN',
+    'spx':      'RISK-DRIVEN',
+    'usdcnh':   'CNH-DRIVEN',
+    'dxy':      'USD-DRIVEN',
+}
+
+def _render_attribution_panel(corr):
+    """Return HTML string for the driver attribution panel."""
+    def r_str(r):
+        return f'{r:+.2f}' if r is not None else 'n/c'
+
+    # Sort by |r_20| descending
+    ranked = sorted(corr, key=lambda n: abs(corr[n][20][0] or 0), reverse=True)
+
+    # Headline
+    top = ranked[0] if ranked else None
+    top_r = corr[top][20][0] if top else None
+    if top_r is not None and abs(top_r) >= 0.25:
+        headline = f'{_DRIVER_HEADLINE[top]} — {_DRIVER_LABELS[top]} leads at r&nbsp;=&nbsp;{r_str(top_r)}&nbsp;(20d)'
+    else:
+        headline = 'DRIVER UNCLEAR — low correlation across all channels'
+
+    # S&P regime flag
+    spx_r20 = corr.get('spx', {}).get(20, (None, 0))[0]
+    spx_r60 = corr.get('spx', {}).get(60, (None, 0))[0]
+    if spx_r20 is not None:
+        if spx_r20 > 0.45:
+            flag_label, flag_txt = 'RISK COUPLING', f'S&amp;P r&nbsp;=&nbsp;{r_str(spx_r20)}&nbsp;(20d) — equity sentiment co-moving with AUD'
+        elif spx_r20 < 0.25 and spx_r60 is not None and spx_r60 > 0.40:
+            flag_label, flag_txt = 'RISK DECOUPLING', f'S&amp;P r&nbsp;=&nbsp;{r_str(spx_r20)}&nbsp;(20d) vs {r_str(spx_r60)}&nbsp;(60d) — fading; idiosyncratic driver emerging'
+        elif spx_r20 < 0.25:
+            flag_label, flag_txt = 'RISK DECOUPLED', f'S&amp;P r&nbsp;=&nbsp;{r_str(spx_r20)}&nbsp;(20d) — rates, China, or USD driving instead'
+        else:
+            flag_label, flag_txt = 'MODERATE RISK COUPLING', f'S&amp;P r&nbsp;=&nbsp;{r_str(spx_r20)}&nbsp;(20d)'
+    else:
+        flag_label, flag_txt = 'RISK — INSUFFICIENT DATA', 'Fewer than 15 overlapping daily observations in 20d window'
+
+    # Bar rows
+    rows = ''
+    for name in ranked:
+        r20, n20 = corr[name][20]
+        r60, n60 = corr[name][60]
+        label = _DRIVER_LABELS[name]
+        exp = _DRIVER_EXPECTED_SIGN[name]
+        low = r20 is None
+        if low:
+            fill_cls, w20 = 'attr-fill positive', '0%'
+            val20 = 'n/c*'
+        else:
+            anomaly = abs(r20) > 0.3 and ((1 if r20 > 0 else -1) != exp)
+            fill_cls = 'attr-fill anomaly' if anomaly else ('attr-fill positive' if r20 >= 0 else 'attr-fill negative')
+            w20  = f'{abs(r20)*100:.1f}%'
+            val20 = r_str(r20)
+        m60_left = f'{abs(r60)*100:.1f}%' if r60 is not None else '0%'
+        val60    = r_str(r60)
+        caveat   = ' <span class="attr-caveat">⚠&nbsp;DXY≈58%&nbsp;EUR</span>' if name == 'dxy' else ''
+        row_cls  = 'attr-row attr-low-conf' if low else 'attr-row'
+        rows += f"""
+    <div class="{row_cls}">
+      <span class="attr-label">{label}</span>
+      <div class="attr-track">
+        <div class="{fill_cls}" style="width:{w20}"></div>
+        <span class="attr-marker-60d" style="left:{m60_left}" title="60d: {val60}"></span>
+      </div>
+      <span class="attr-val">{val20}</span>
+      <span class="attr-val-60d">{val60}&nbsp;(60d)</span>{caveat}
+    </div>"""
+
+    return f"""<div class="attr-headline">{headline}</div>
+  <div class="attr-section">{rows}
+  </div>
+  <div class="attr-flag"><strong>&#x26A1; {flag_label}</strong> &nbsp;&mdash;&nbsp; {flag_txt}</div>
+  <p class="attr-note">Daily log&nbsp;returns / spread&nbsp;&Delta;bp &middot; 20-trading-day window &middot; &#9670;&nbsp;=&nbsp;60d marker &middot; *&nbsp;=&nbsp;low&nbsp;confidence (&lt;{round(20*0.75)}&nbsp;obs).<br>
+  Caveats: AU yields close ~4h before NYC (half-day skew on spread) &middot; DXY is 58%&nbsp;EUR-weighted, not a pure AUD/USD&nbsp;inverse &middot; TIO=F liquidity thins near contract&nbsp;roll.</p>"""
+
+# ---------------------------------------------------------------------------
 # FETCH ALL LIVE DATA
 # ---------------------------------------------------------------------------
 YF_TICKERS = {
@@ -146,27 +329,40 @@ YF_TICKERS = {
     'iron_ore': 'TIO=F',
 }
 
+# 4-month daily history for correlation panel (5 drivers + AUD/USD)
+# Note: CNH=X (offshore) has no YF history; use USDCNY=X (onshore) as proxy
+HIST_TICKERS = {
+    'audusd':   'AUDUSD=X',
+    'dxy':      'DX-Y.NYB',
+    'usdcnh':   'USDCNY=X',
+    'spx':      '^GSPC',
+    'iron_ore': 'TIO=F',
+}
+
 print('Fetching Yahoo Finance tickers (parallel)…')
 _yf_results = {}
-with ThreadPoolExecutor(max_workers=6) as _ex:
-    _futures = {_ex.submit(_yf, ticker): key for key, ticker in YF_TICKERS.items()}
-    for _fut in list(_futures):
-        _key = _futures[_fut]
-        _yf_results[_key] = _fut.result()
+_hist_results = {}
+with ThreadPoolExecutor(max_workers=10) as _ex:
+    _tile_futs = {_ex.submit(_yf, ticker): key for key, ticker in YF_TICKERS.items()}
+    _hist_futs = {_ex.submit(_yf_history, ticker): key for key, ticker in HIST_TICKERS.items()}
+    for _fut in list(_tile_futs):
+        _yf_results[_tile_futs[_fut]] = _fut.result()
+    for _fut in list(_hist_futs):
+        _hist_results[_hist_futs[_fut]] = _fut.result()
 
 for _k, (_l, _p, _d) in _yf_results.items():
     print(f'  {_k:12} {f"{_l:.4g}" if _l else "FAILED"}')
 
 print('Fetching AU yields (RBA F2)…')
-au2y, au2y_prev, au10y, au10y_prev, _f2_date = _fetch_rba_f2()
-print(f'  AU2y={au2y}  AU10y={au10y}  ({_f2_date})')
+au2y, au2y_prev, au10y, au10y_prev, _f2_date, _au2y_hist = _fetch_rba_f2()
+print(f'  AU2y={au2y}  AU10y={au10y}  ({_f2_date})  hist={len(_au2y_hist)}d')
 
 print('Fetching US 2y yield (Alpha Vantage)…')
-_us2y_raw, _us2y_date_raw = _fetch_us2y_av()
+_us2y_raw, _us2y_date_raw, _us2y_hist = _fetch_us2y_av()
 us2y      = _us2y_raw
 us2y_date = (datetime.strptime(_us2y_date_raw, '%Y-%m-%d').strftime('%d %b')
              if _us2y_date_raw else '?')
-print(f'  US2y={us2y}  ({us2y_date})')
+print(f'  US2y={us2y}  ({us2y_date})  hist={len(_us2y_hist)}d')
 
 print('Fetching RBA cash rate & BABs (F1)…')
 rba_cash_rate, rba_babs_1m, rba_babs_3m, rba_cut_prob, _rba_f1_date = _fetch_rba_f1()
@@ -177,6 +373,35 @@ cot = _fetch_cot()
 print(f'  AM_net={cot["am_net"] if cot else "FAILED"}  '
       f'LF_net={cot["lev_net"] if cot else "FAILED"}  '
       f'({cot["cot_date"] if cot else "?"})')
+
+# ---------------------------------------------------------------------------
+# CORRELATION — build spread series, compute all driver correlations
+# ---------------------------------------------------------------------------
+# Spread (bp) = (AU 2y % - US 2y %) * 100, daily, pairwise-complete dates
+_spread_hist = {
+    d: (_au2y_hist[d] - _us2y_hist[d]) * 100
+    for d in sorted(set(_au2y_hist) & set(_us2y_hist))
+}
+
+_driver_hists = {
+    'spread':   _spread_hist,
+    'iron_ore': _hist_results.get('iron_ore', {}),
+    'spx':      _hist_results.get('spx', {}),
+    'usdcnh':   _hist_results.get('usdcnh', {}),
+    'dxy':      _hist_results.get('dxy', {}),
+}
+print('Computing driver correlations…')
+corr_results = compute_correlations(
+    _hist_results.get('audusd', {}),
+    _driver_hists,
+    use_diffs={'spread'},
+)
+for _name, _res in corr_results.items():
+    _r20, _n20 = _res[20];  _r60, _n60 = _res[60]
+    print(f'  {_name:12} r20={f"{_r20:.3f}" if _r20 else "n/c":>7} ({_n20}obs)'
+          f'  r60={f"{_r60:.3f}" if _r60 else "n/c":>7} ({_n60}obs)')
+
+attribution_html = _render_attribution_panel(corr_results)
 
 # ---------------------------------------------------------------------------
 # ASSEMBLE DATA DICT
@@ -366,6 +591,25 @@ CHART_CSS = """
 .preset:hover{border-color:var(--aud);color:var(--text)}
 .preset.active{background:var(--aud);border-color:var(--aud);color:var(--ink);font-weight:600}
 .source{margin-top:18px;margin-bottom:6px;font-size:11px;color:var(--text-faint);letter-spacing:.03em}
+
+/* ── DRIVER ATTRIBUTION PANEL ── */
+.attr-headline{font-family:'Fraunces',serif;font-size:1.05rem;font-weight:600;color:var(--gold);margin-bottom:20px;letter-spacing:-.01em}
+.attr-section{margin-bottom:12px}
+.attr-row{display:flex;align-items:center;gap:10px;margin-bottom:9px;font-size:0.78rem}
+.attr-low-conf{opacity:.42}
+.attr-label{width:155px;color:var(--text-dim);flex-shrink:0;font-size:0.75rem}
+.attr-track{flex:1;height:8px;background:var(--panel-edge);border-radius:4px;position:relative;min-width:80px}
+.attr-fill{height:100%;border-radius:4px;position:absolute;top:0;left:0}
+.attr-fill.positive{background:var(--green)}
+.attr-fill.negative{background:var(--red)}
+.attr-fill.anomaly{background:var(--amber)}
+.attr-marker-60d{position:absolute;top:-4px;width:2px;height:16px;background:var(--gold);border-radius:1px;opacity:.6}
+.attr-val{width:42px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--text)}
+.attr-val-60d{width:76px;color:var(--text-faint);font-size:0.68rem}
+.attr-caveat{font-size:0.65rem;color:var(--amber);margin-left:4px;opacity:.85}
+.attr-flag{background:rgba(240,179,41,.07);border:1px solid rgba(240,179,41,.18);border-radius:8px;padding:10px 16px;font-size:0.75rem;color:var(--text-dim);margin-top:16px;line-height:1.55}
+.attr-flag strong{color:var(--gold)}
+.attr-note{margin-top:14px;font-size:0.66rem;color:var(--text-faint);line-height:1.65}
 """
 
 # Section 02 chart markup (replaces the old yield table).
@@ -1131,6 +1375,17 @@ body {{
   </div>
 
 </div><!-- /tiles-grid -->
+
+
+<!-- ─── DRIVER ATTRIBUTION ─── -->
+<div class="section-header" style="margin-top:36px">
+  <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">DRIVER ATTRIBUTION</span>
+  <div class="sec-line"></div>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--panel-edge);border-radius:12px;padding:22px 26px 18px">
+  {attribution_html}
+</div>
 
 
 <!-- ─── 02 RATE DIFFERENTIALS ─── -->

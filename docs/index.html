@@ -563,6 +563,25 @@ body {
 .preset.active{background:var(--aud);border-color:var(--aud);color:var(--ink);font-weight:600}
 .source{margin-top:18px;margin-bottom:6px;font-size:11px;color:var(--text-faint);letter-spacing:.03em}
 
+/* ── DRIVER ATTRIBUTION PANEL ── */
+.attr-headline{font-family:'Fraunces',serif;font-size:1.05rem;font-weight:600;color:var(--gold);margin-bottom:20px;letter-spacing:-.01em}
+.attr-section{margin-bottom:12px}
+.attr-row{display:flex;align-items:center;gap:10px;margin-bottom:9px;font-size:0.78rem}
+.attr-low-conf{opacity:.42}
+.attr-label{width:155px;color:var(--text-dim);flex-shrink:0;font-size:0.75rem}
+.attr-track{flex:1;height:8px;background:var(--panel-edge);border-radius:4px;position:relative;min-width:80px}
+.attr-fill{height:100%;border-radius:4px;position:absolute;top:0;left:0}
+.attr-fill.positive{background:var(--green)}
+.attr-fill.negative{background:var(--red)}
+.attr-fill.anomaly{background:var(--amber)}
+.attr-marker-60d{position:absolute;top:-4px;width:2px;height:16px;background:var(--gold);border-radius:1px;opacity:.6}
+.attr-val{width:42px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--text)}
+.attr-val-60d{width:76px;color:var(--text-faint);font-size:0.68rem}
+.attr-caveat{font-size:0.65rem;color:var(--amber);margin-left:4px;opacity:.85}
+.attr-flag{background:rgba(240,179,41,.07);border:1px solid rgba(240,179,41,.18);border-radius:8px;padding:10px 16px;font-size:0.75rem;color:var(--text-dim);margin-top:16px;line-height:1.55}
+.attr-flag strong{color:var(--gold)}
+.attr-note{margin-top:14px;font-size:0.66rem;color:var(--text-faint);line-height:1.65}
+
 </style>
 </head>
 <body>
@@ -574,7 +593,7 @@ body {
     <div class="header-date">Monday 1 June 2026 &nbsp;&bull;&nbsp; Data as of 01 Jun 2026</div>
   </div>
   <div class="header-right">
-    <div class="regime-pill">AUD BID &nbsp;&bull;&nbsp; Daily +0.25%</div>
+    <div class="regime-pill">AUD BID &nbsp;&bull;&nbsp; Daily +0.32%</div>
     <div class="api-note">All data via live APIs &middot; No screenshots</div>
   </div>
 </header>
@@ -597,9 +616,9 @@ body {
       <span class="tile-label">AUD / USD</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value green">0.7182</div>
+    <div class="tile-value green">0.7187</div>
     <div class="tile-bottom">
-      <span class="green">▲ +0.25%</span>
+      <span class="green">▲ +0.32%</span>
       <span class="tile-ref">prev 0.7164</span>
     </div>
   </div>
@@ -610,9 +629,9 @@ body {
       <span class="tile-label">DXY Index</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value red">99.041</div>
+    <div class="tile-value red">99.045</div>
     <div class="tile-bottom">
-      <span class="red">▲ +0.13%</span>
+      <span class="red">▲ +0.14%</span>
       <span class="tile-ref">prev 98.910</span>
     </div>
   </div>
@@ -635,9 +654,9 @@ body {
       <span class="tile-label">Gold (GC=F)</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value gold">4,573.90</div>
+    <div class="tile-value gold">4,570.90</div>
     <div class="tile-bottom">
-      <span class="green">▲ +0.29%</span>
+      <span class="green">▲ +0.23%</span>
       <span class="tile-ref">prev 4,560.50</span>
     </div>
   </div>
@@ -648,9 +667,9 @@ body {
       <span class="tile-label">AUD / JPY</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value green">114.473</div>
+    <div class="tile-value green">114.545</div>
     <div class="tile-bottom">
-      <span class="green">▲ +0.36%</span>
+      <span class="green">▲ +0.43%</span>
       <span class="tile-ref">prev 114.060</span>
     </div>
   </div>
@@ -661,7 +680,7 @@ body {
       <span class="tile-label">USD / CNH</span>
       <span class="badge badge-yf">YF</span>
     </div>
-    <div class="tile-value mono dim-text">6.7637</div>
+    <div class="tile-value mono dim-text">6.7643</div>
     <div class="tile-bottom">
       <span class="data-gap">prev close n/a</span>
     </div>
@@ -694,6 +713,67 @@ body {
   </div>
 
 </div><!-- /tiles-grid -->
+
+
+<!-- ─── DRIVER ATTRIBUTION ─── -->
+<div class="section-header" style="margin-top:36px">
+  <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">DRIVER ATTRIBUTION</span>
+  <div class="sec-line"></div>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--panel-edge);border-radius:12px;padding:22px 26px 18px">
+  <div class="attr-headline">CNH-DRIVEN — USD/CNY (CNH proxy) leads at r&nbsp;=&nbsp;-0.65&nbsp;(20d)</div>
+  <div class="attr-section">
+    <div class="attr-row">
+      <span class="attr-label">USD/CNY (CNH proxy)</span>
+      <div class="attr-track">
+        <div class="attr-fill negative" style="width:65.0%"></div>
+        <span class="attr-marker-60d" style="left:18.2%" title="60d: -0.18"></span>
+      </div>
+      <span class="attr-val">-0.65</span>
+      <span class="attr-val-60d">-0.18&nbsp;(60d)</span>
+    </div>
+    <div class="attr-row">
+      <span class="attr-label">DXY</span>
+      <div class="attr-track">
+        <div class="attr-fill anomaly" style="width:32.6%"></div>
+        <span class="attr-marker-60d" style="left:15.5%" title="60d: +0.16"></span>
+      </div>
+      <span class="attr-val">+0.33</span>
+      <span class="attr-val-60d">+0.16&nbsp;(60d)</span> <span class="attr-caveat">⚠&nbsp;DXY≈58%&nbsp;EUR</span>
+    </div>
+    <div class="attr-row">
+      <span class="attr-label">Iron ore (TIO=F)</span>
+      <div class="attr-track">
+        <div class="attr-fill positive" style="width:32.3%"></div>
+        <span class="attr-marker-60d" style="left:5.5%" title="60d: +0.06"></span>
+      </div>
+      <span class="attr-val">+0.32</span>
+      <span class="attr-val-60d">+0.06&nbsp;(60d)</span>
+    </div>
+    <div class="attr-row">
+      <span class="attr-label">S&P 500</span>
+      <div class="attr-track">
+        <div class="attr-fill negative" style="width:8.3%"></div>
+        <span class="attr-marker-60d" style="left:38.7%" title="60d: +0.39"></span>
+      </div>
+      <span class="attr-val">-0.08</span>
+      <span class="attr-val-60d">+0.39&nbsp;(60d)</span>
+    </div>
+    <div class="attr-row attr-low-conf">
+      <span class="attr-label">AU–US 2y spread</span>
+      <div class="attr-track">
+        <div class="attr-fill positive" style="width:0%"></div>
+        <span class="attr-marker-60d" style="left:0%" title="60d: n/c"></span>
+      </div>
+      <span class="attr-val">n/c*</span>
+      <span class="attr-val-60d">n/c&nbsp;(60d)</span>
+    </div>
+  </div>
+  <div class="attr-flag"><strong>&#x26A1; RISK DECOUPLED</strong> &nbsp;&mdash;&nbsp; S&amp;P r&nbsp;=&nbsp;-0.08&nbsp;(20d) — rates, China, or USD driving instead</div>
+  <p class="attr-note">Daily log&nbsp;returns / spread&nbsp;&Delta;bp &middot; 20-trading-day window &middot; &#9670;&nbsp;=&nbsp;60d marker &middot; *&nbsp;=&nbsp;low&nbsp;confidence (&lt;15&nbsp;obs).<br>
+  Caveats: AU yields close ~4h before NYC (half-day skew on spread) &middot; DXY is 58%&nbsp;EUR-weighted, not a pure AUD/USD&nbsp;inverse &middot; TIO=F liquidity thins near contract&nbsp;roll.</p>
+</div>
 
 
 <!-- ─── 02 RATE DIFFERENTIALS ─── -->
@@ -925,17 +1005,17 @@ body {
     <tr>
       <td>Gold</td>
       <td>GC=F (front month)</td>
-      <td>4,573.90</td>
+      <td>4,570.90</td>
       <td>4,560.50</td>
-      <td class="chg-positive">▲ +0.29%</td>
+      <td class="chg-positive">▲ +0.23%</td>
       <td><span class="badge badge-yf">YF</span></td>
     </tr>
     <tr>
       <td>Copper</td>
       <td>HG=F (front month)</td>
-      <td>6.426</td>
+      <td>6.425</td>
       <td>6.359</td>
-      <td class="chg-negative">▼ +1.05%</td>
+      <td class="chg-negative">▼ +1.04%</td>
       <td><span class="badge badge-yf">YF</span></td>
     </tr>
     <tr>
@@ -949,7 +1029,7 @@ body {
     <tr>
       <td>USD / CNH</td>
       <td>Offshore RMB</td>
-      <td>6.7637</td>
+      <td>6.7643</td>
       <td class="data-gap">prev n/a</td>
       <td class="data-gap">n/a</td>
       <td><span class="badge badge-yf">YF</span></td>
