@@ -543,9 +543,10 @@ print(f'  AM_net={cot["am_net"] if cot else "FAILED"}  '
 # ---------------------------------------------------------------------------
 # CORRELATION — build spread series, compute all driver correlations
 # ---------------------------------------------------------------------------
-# Spread (bp) = (AU 2y % - US 2y %) * 100, daily, pairwise-complete dates
+# Spread in percentage points (AU 2y % - US 2y %), daily, pairwise-complete dates
+# Stored in % so OLS betas are per 1 ppt change (not per 1 bp), keeping coefficients readable
 _spread_hist = {
-    d: (_au2y_hist[d] - _us2y_hist[d]) * 100
+    d: (_au2y_hist[d] - _us2y_hist[d])
     for d in sorted(set(_au2y_hist) & set(_us2y_hist))
 }
 
@@ -793,6 +794,7 @@ def badge(src):
         'RBA':  ('badge-rba',  'RBA'),
         'CFTC': ('badge-cftc', 'CFTC'),
         'AV':   ('badge-av',   'AV'),
+        'FRED': ('badge-av',   'FRED'),
         'SCR':  ('badge-scr',  'SCR'),
     }
     cls, label = badges.get(src, ('badge-scr', src))
@@ -1282,7 +1284,7 @@ DRIVER_PANEL_HTML = """
   </div>
 </div>
 
-<p class="source" style="margin-top:10px">Rolling OLS: AUD/USD weekly log-returns ~ AU&ndash;US 2y spread (&Delta;bp) + S&amp;P 500 + USD/CNY + iron ore &middot; 2Y / 1Y trailing window (weekly data) &middot; DXY excluded (collinear with USD/CNY) &middot; Yahoo Finance, RBA F2, FRED. Latest week&rsquo;s attribution uses 2Y betas &times; actual driver moves. &sigma; bands are trailing 1Y mean &plusmn; std of rolling betas.</p>
+<p class="source" style="margin-top:10px">Rolling OLS: AUD/USD weekly log-returns ~ AU&ndash;US 2y spread (&Delta;ppt) + S&amp;P 500 + USD/CNY + iron ore &middot; 2Y / 1Y trailing window (weekly data) &middot; DXY excluded (collinear with USD/CNY) &middot; Yahoo Finance, RBA F2, FRED. Latest week&rsquo;s attribution uses 2Y betas &times; actual driver moves. &sigma; bands are trailing 1Y mean &plusmn; std of rolling betas.</p>
 """
 
 DRIVER_CSS = """
@@ -1954,7 +1956,7 @@ body {{
   <div class="tile">
     <div class="tile-top">
       <span class="tile-label">AU&minus;US 2y Spread</span>
-      {badge('RBA')}{badge('AV')}
+      {badge('RBA')}{badge('FRED')}
     </div>
     <div class="tile-value gold">{data['spread_2y']} bp</div>
     <div class="tile-bottom">
