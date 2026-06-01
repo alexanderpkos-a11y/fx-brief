@@ -12,6 +12,7 @@ import csv
 import io
 import math
 import bisect
+import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 AV_API_KEY = os.environ.get('AV_API_KEY', '')  # set via GitHub Secret or local env
@@ -274,6 +275,161 @@ def _compute_rolling_corr_series(aud_hist, driver_hists, use_diffs, window=20, s
     return records
 
 # ---------------------------------------------------------------------------
+# ROLLING OLS BETA PIPELINE
+# ---------------------------------------------------------------------------
+PRINT_DIAGNOSTICS = os.environ.get('PRINT_DIAGNOSTICS', '').lower() in ('1', 'true', 'yes')
+
+def _to_returns_df(aud_hist, driver_hists, spread_lag=1):
+    """Align all series, compute log returns / first diffs, return (dates, y, X).
+    X columns (in order): intercept, dxy, spread, spx, usdcnh, iron.
+    spread uses first differences; all others use log returns.
+    spread_lag shifts spread forward by N days so today's regression uses the
+    prior day's spread value (conservative: AU yields close ~4h before NYSE)."""
+    spread_hist = driver_hists.get('spread', {})
+    dxy_hist    = driver_hists.get('dxy', {})
+    spx_hist    = driver_hists.get('spx', {})
+    usdcnh_hist = driver_hists.get('usdcnh', {})
+    iron_hist   = driver_hists.get('iron_ore', {})
+
+    # Build return series as dicts
+    aud_r   = dict(_log_returns(aud_hist))
+    dxy_r   = dict(_log_returns(dxy_hist))
+    spx_r   = dict(_log_returns(spx_hist))
+    usdcnh_r = dict(_log_returns(usdcnh_hist))
+    iron_r  = dict(_log_returns(iron_hist))
+    spread_d = dict(_first_diffs(spread_hist))   # first diff in bp
+
+    # Collect all return dates and apply spread lag
+    all_dates = sorted(set(aud_r) & set(dxy_r) & set(spx_r) & set(usdcnh_r))
+    # iron is allowed to be missing (starts 2013) — use NaN when absent
+    spread_dates = sorted(spread_d)
+    # lagged spread: for each date, use the spread diff from `spread_lag` earlier trading days
+    spread_lagged = {}
+    for i, d in enumerate(spread_dates):
+        if spread_lag == 0:
+            spread_lagged[d] = spread_d[d]
+        elif i >= spread_lag:
+            spread_lagged[d] = spread_d[spread_dates[i - spread_lag]]
+
+    dates_out, y_out, X_rows = [], [], []
+    for d in all_dates:
+        y = aud_r.get(d)
+        xd = dxy_r.get(d)
+        xs = spread_lagged.get(d)   # may be None if spread missing
+        xp = spx_r.get(d)
+        xc = usdcnh_r.get(d)
+        xi = iron_r.get(d)          # may be None pre-2013
+        if y is None or xd is None or xp is None or xc is None:
+            continue  # core series must be present
+        dates_out.append(d)
+        y_out.append(y)
+        X_rows.append([1.0,
+                        xd,
+                        xs if xs is not None else float('nan'),
+                        xp,
+                        xc,
+                        xi if xi is not None else float('nan')])
+
+    return (
+        dates_out,
+        np.array(y_out, dtype=float),
+        np.array(X_rows, dtype=float),
+    )
+
+def _rolling_ols_betas(y_arr, X_arr, window=252, min_obs_frac=0.75):
+    """Rolling OLS via np.linalg.lstsq. Returns (betas, r2) both shape (n, k) / (n,).
+    Rows where window has fewer than min_obs finite pairs are NaN."""
+    n, k = X_arr.shape
+    min_obs = round(window * min_obs_frac)
+    betas = np.full((n, k), np.nan)
+    r2    = np.full(n, np.nan)
+    for i in range(window - 1, n):
+        yi = y_arr[i - window + 1:i + 1]
+        Xi = X_arr[i - window + 1:i + 1]
+        mask = np.isfinite(yi) & np.all(np.isfinite(Xi), axis=1)
+        if mask.sum() < min_obs:
+            continue
+        b, _, _, _ = np.linalg.lstsq(Xi[mask], yi[mask], rcond=None)
+        betas[i] = b
+        yhat  = Xi[mask] @ b
+        ss_res = np.sum((yi[mask] - yhat) ** 2)
+        ss_tot = np.sum((yi[mask] - yi[mask].mean()) ** 2)
+        r2[i]  = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
+    return betas, r2
+
+def _add_beta_bands(dates, betas, r2_arr, col_names, sample_every=5, band_window=252):
+    """Compute trailing mean/std bands on each beta series.
+    Returns list of dicts (weekly sampled) with beta values + band columns."""
+    n = len(dates)
+    records = []
+    band_half = band_window // 2  # minimum obs to compute std (avoid very early noise)
+    for i in range(n):
+        if i % sample_every != 0 and i < n - 1:
+            continue
+        rec = {'date': dates[i], 'r2': round(float(r2_arr[i]), 4) if np.isfinite(r2_arr[i]) else None}
+        lo = max(0, i - band_window + 1)
+        for j, name in enumerate(col_names):
+            b = betas[i, j]
+            window_vals = betas[lo:i + 1, j]
+            valid = window_vals[np.isfinite(window_vals)]
+            rec[name] = round(float(b), 5) if np.isfinite(b) else None
+            if len(valid) >= band_half:
+                mu  = float(np.mean(valid))
+                sig = float(np.std(valid, ddof=1))
+                rec[f'{name}_mean'] = round(mu, 5)
+                rec[f'{name}_u1']   = round(mu + sig, 5)
+                rec[f'{name}_l1']   = round(mu - sig, 5)
+                rec[f'{name}_u2']   = round(mu + 2*sig, 5)
+                rec[f'{name}_l2']   = round(mu - 2*sig, 5)
+            else:
+                for sfx in ('_mean','_u1','_l1','_u2','_l2'):
+                    rec[name + sfx] = None
+        records.append(rec)
+    return records
+
+def _static_ols_diagnostics(y_arr, X_arr, col_names):
+    """Full-sample OLS diagnostics: betas, approximate t-stats, R², VIF.
+    col_names should match columns of X_arr (including 'intercept')."""
+    mask = np.isfinite(y_arr) & np.all(np.isfinite(X_arr), axis=1)
+    y = y_arr[mask]; X = X_arr[mask]
+    b, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
+    yhat  = X @ b
+    resid = y - yhat
+    n, k  = X.shape
+    s2    = np.sum(resid**2) / max(n - k, 1)
+    try:
+        cov = s2 * np.linalg.inv(X.T @ X)
+        se  = np.sqrt(np.diag(cov))
+    except np.linalg.LinAlgError:
+        se = np.full(k, np.nan)
+    ss_tot = np.sum((y - y.mean())**2)
+    ss_res = np.sum(resid**2)
+    r2_full = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+    EXPECTED_SIGN = {'dxy': -1, 'spread': 1, 'spx': 1, 'usdcnh': -1, 'iron': 1}
+    print('\n── Static OLS (full sample) ──────────────────────────')
+    print(f'  n={mask.sum()} obs  R²={r2_full:.4f}')
+    for j, name in enumerate(col_names):
+        t = b[j] / se[j] if se[j] > 0 else float('nan')
+        stars = '***' if abs(t) > 2.576 else ('**' if abs(t) > 1.960 else ('*' if abs(t) > 1.645 else ''))
+        exp = EXPECTED_SIGN.get(name)
+        sign_ok = '' if exp is None else (' ✓' if (b[j] * exp > 0) else ' ✗ SIGN MISMATCH!')
+        # VIF for non-intercept columns
+        vif_str = ''
+        if name != 'intercept':
+            other_cols = [c for c in range(k) if c != j]
+            Xj = X[:, j]; Xo = X[:, other_cols]
+            bv, _, _, _ = np.linalg.lstsq(Xo, Xj, rcond=None)
+            xjhat = Xo @ bv
+            ss_tot_j = np.sum((Xj - Xj.mean())**2)
+            ss_res_j = np.sum((Xj - xjhat)**2)
+            r2j = 1 - ss_res_j / ss_tot_j if ss_tot_j > 0 else 0
+            vif = 1 / (1 - r2j) if r2j < 1 else float('inf')
+            vif_str = f'  VIF={vif:.1f}{"  ⚠ collinear" if vif > 5 else ""}'
+        print(f'  {name:12}  β={b[j]:+.4f}  t={t:+.1f} {stars:3}{sign_ok}{vif_str}')
+    print('──────────────────────────────────────────────────────\n')
+
+# ---------------------------------------------------------------------------
 # DRIVER ATTRIBUTION RENDERER
 # ---------------------------------------------------------------------------
 _DRIVER_LABELS = {
@@ -462,6 +618,93 @@ print(f'  20d series: {len(_corr_series_20)} records  |  60d series: {len(_corr_
 _c20j = json.dumps(_corr_series_20, separators=(',', ':'))
 _c60j = json.dumps(_corr_series_60, separators=(',', ':'))
 corr_data_script = f'<script>\nvar CORR20_SERIES={_c20j};\nvar CORR60_SERIES={_c60j};\n</script>'
+
+# ---------------------------------------------------------------------------
+# ROLLING OLS BETAS
+# ---------------------------------------------------------------------------
+_BETA_DRIVERS = ['dxy', 'spread', 'spx', 'usdcnh', 'iron']
+_BETA_COL_NAMES = ['intercept'] + _BETA_DRIVERS
+
+print('Computing rolling OLS betas (252d window)…')
+_beta_dates, _beta_y, _beta_X = _to_returns_df(
+    _hist_results.get('audusd', {}), _driver_hists, spread_lag=1)
+print(f'  {len(_beta_dates)} aligned return-days after differencing')
+
+# Drop columns that are entirely NaN (e.g. spread when AV key absent locally)
+_col_finite = [np.any(np.isfinite(_beta_X[:, j])) for j in range(_beta_X.shape[1])]
+_active_col_names = [n for n, ok in zip(_BETA_COL_NAMES, _col_finite) if ok]
+_active_driver_names = [n for n in _BETA_DRIVERS if n in _active_col_names]
+_beta_X_active = _beta_X[:, _col_finite]
+_dropped = [n for n, ok in zip(_BETA_COL_NAMES, _col_finite) if not ok]
+if _dropped:
+    print(f'  Dropped all-NaN predictors: {_dropped} (missing data source)')
+
+if PRINT_DIAGNOSTICS:
+    _static_ols_diagnostics(_beta_y, _beta_X_active, _active_col_names)
+
+_betas_252_raw, _r2_252 = _rolling_ols_betas(_beta_y, _beta_X_active, window=252)
+_betas_60_raw,  _r2_60  = _rolling_ols_betas(_beta_y, _beta_X_active, window=60)
+print(f'  252d window: {int(np.isfinite(_r2_252).sum())} valid rows  |  60d: {int(np.isfinite(_r2_60).sum())} valid rows')
+
+# Reconstruct full-width beta arrays (NaN for dropped columns) so downstream code is consistent
+def _expand_betas(betas_raw, active_names, all_names):
+    """Re-insert NaN columns for drivers that were dropped."""
+    n = betas_raw.shape[0]
+    out = np.full((n, len(all_names)), np.nan)
+    active_idx = {name: i for i, name in enumerate(active_names)}
+    for j, name in enumerate(all_names):
+        if name in active_idx:
+            out[:, j] = betas_raw[:, active_idx[name]]
+    return out
+
+_betas_252 = _expand_betas(_betas_252_raw, _active_col_names, _BETA_COL_NAMES)
+_betas_60  = _expand_betas(_betas_60_raw,  _active_col_names, _BETA_COL_NAMES)
+
+# Slice to driver columns only (exclude intercept at index 0)
+_driver_col_idx = {n: i+1 for i, n in enumerate(_BETA_DRIVERS)}  # +1 for intercept offset
+_betas_drv_252 = _betas_252[:, 1:]  # columns 1-5 = drivers
+_betas_drv_60  = _betas_60[:, 1:]
+
+_beta_series_252 = _add_beta_bands(_beta_dates, _betas_drv_252, _r2_252, _BETA_DRIVERS, sample_every=5)
+_beta_series_60  = _add_beta_bands(_beta_dates, _betas_drv_60,  _r2_60,  _BETA_DRIVERS, sample_every=5)
+print(f'  Beta series: {len(_beta_series_252)} weekly records (252d)  |  {len(_beta_series_60)} (60d)')
+
+# Latest betas (most recent row with at least one non-NaN driver) — used by sensitivity panel
+def _latest_valid(series_list, names):
+    for rec in reversed(series_list):
+        if any(rec.get(n) is not None for n in names):
+            return rec
+    return None
+
+_latest_252 = _latest_valid(_beta_series_252, _BETA_DRIVERS)
+_latest_60  = _latest_valid(_beta_series_60,  _BETA_DRIVERS)
+
+def _build_latest_betas(rec, names):
+    if rec is None:
+        return {}
+    out = {'date': rec['date'], 'r2': rec.get('r2')}
+    for n in names:
+        out[n] = {
+            'beta': rec.get(n),
+            'mean': rec.get(n + '_mean'),
+            'u1':   rec.get(n + '_u1'),
+            'l1':   rec.get(n + '_l1'),
+            'u2':   rec.get(n + '_u2'),
+            'l2':   rec.get(n + '_l2'),
+        }
+    return out
+
+_latest_betas_252 = _build_latest_betas(_latest_252, _BETA_DRIVERS)
+_latest_betas_60  = _build_latest_betas(_latest_60,  _BETA_DRIVERS)
+
+_lb252j = json.dumps(_latest_betas_252, separators=(',', ':'))
+_lb60j  = json.dumps(_latest_betas_60,  separators=(',', ':'))
+beta_data_script = (
+    f'<script>\n'
+    f'var LATEST_BETAS_252={_lb252j};\n'
+    f'var LATEST_BETAS_60={_lb60j};\n'
+    f'</script>'
+)
 
 # ---------------------------------------------------------------------------
 # ASSEMBLE DATA DICT
@@ -1039,6 +1282,320 @@ CORR_INIT_SCRIPT = """<script>
   corrApply();
 })();
 </script>"""
+
+# ---------------------------------------------------------------------------
+# BETA SENSITIVITY PANEL
+# ---------------------------------------------------------------------------
+BETA_PANEL_HTML = """
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+  <div style="font-size:0.72rem;color:var(--text-dim)">
+    Rolling OLS betas &nbsp;&middot;&nbsp; adjust driver moves &rarr; implied AUD/USD impact
+  </div>
+  <div id="beta_toggleBtns" class="presets" style="margin-top:0">
+    <button class="preset active" data-w="252">252d</button>
+    <button class="preset" data-w="60">60d</button>
+  </div>
+</div>
+
+<div class="panel-box" style="padding:18px 22px 16px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:18px;flex-wrap:wrap;gap:6px">
+    <div class="panel-title" style="font-size:15px">Beta sensitivity tool</div>
+    <div style="font-size:0.68rem;color:var(--text-faint)">
+      R&sup2;&nbsp;=&nbsp;<span id="beta_r2">—</span> &nbsp;&middot;&nbsp;
+      model explains <span id="beta_r2_pct">—</span> of daily variance
+    </div>
+  </div>
+
+  <!-- Driver rows -->
+  <div id="beta_rows" style="display:flex;flex-direction:column;gap:14px;margin-bottom:22px">
+
+    <!-- DXY -->
+    <div class="beta-row" data-driver="dxy" data-unit="pct" data-sign="-1">
+      <div class="beta-label"><span class="dot" style="background:#f05a52"></span>DXY</div>
+      <div class="beta-stat">
+        <span class="beta-val" id="beta_val_dxy">—</span>
+        <span class="beta-badge" id="beta_badge_dxy"></span>
+      </div>
+      <div class="beta-slider-wrap">
+        <input type="range" class="beta-slider" id="beta_sl_dxy"
+               min="-30" max="30" value="0" step="1">
+        <span class="beta-slider-label" id="beta_sllbl_dxy">0.0%</span>
+      </div>
+      <div class="beta-implied">
+        <span class="beta-arrow" id="beta_arr_dxy">→</span>
+        <span class="beta-impl-val" id="beta_impl_dxy">—</span>
+      </div>
+    </div>
+
+    <!-- AU-US Spread -->
+    <div class="beta-row" data-driver="spread" data-unit="bp" data-sign="1">
+      <div class="beta-label"><span class="dot" style="background:#4b8ef0"></span>AU&ndash;US 2y</div>
+      <div class="beta-stat">
+        <span class="beta-val" id="beta_val_spread">—</span>
+        <span class="beta-badge" id="beta_badge_spread"></span>
+      </div>
+      <div class="beta-slider-wrap">
+        <input type="range" class="beta-slider" id="beta_sl_spread"
+               min="-20" max="20" value="0" step="1">
+        <span class="beta-slider-label" id="beta_sllbl_spread">0 bp</span>
+      </div>
+      <div class="beta-implied">
+        <span class="beta-arrow" id="beta_arr_spread">→</span>
+        <span class="beta-impl-val" id="beta_impl_spread">—</span>
+      </div>
+    </div>
+
+    <!-- S&P 500 -->
+    <div class="beta-row" data-driver="spx" data-unit="pct" data-sign="1">
+      <div class="beta-label"><span class="dot" style="background:#2fcb9a"></span>S&amp;P 500</div>
+      <div class="beta-stat">
+        <span class="beta-val" id="beta_val_spx">—</span>
+        <span class="beta-badge" id="beta_badge_spx"></span>
+      </div>
+      <div class="beta-slider-wrap">
+        <input type="range" class="beta-slider" id="beta_sl_spx"
+               min="-50" max="50" value="0" step="1">
+        <span class="beta-slider-label" id="beta_sllbl_spx">0.0%</span>
+      </div>
+      <div class="beta-implied">
+        <span class="beta-arrow" id="beta_arr_spx">→</span>
+        <span class="beta-impl-val" id="beta_impl_spx">—</span>
+      </div>
+    </div>
+
+    <!-- USD/CNY -->
+    <div class="beta-row" data-driver="usdcnh" data-unit="pct" data-sign="-1">
+      <div class="beta-label"><span class="dot" style="background:#c084fc"></span>USD/CNY</div>
+      <div class="beta-stat">
+        <span class="beta-val" id="beta_val_usdcnh">—</span>
+        <span class="beta-badge" id="beta_badge_usdcnh"></span>
+      </div>
+      <div class="beta-slider-wrap">
+        <input type="range" class="beta-slider" id="beta_sl_usdcnh"
+               min="-30" max="30" value="0" step="1">
+        <span class="beta-slider-label" id="beta_sllbl_usdcnh">0.0%</span>
+      </div>
+      <div class="beta-implied">
+        <span class="beta-arrow" id="beta_arr_usdcnh">→</span>
+        <span class="beta-impl-val" id="beta_impl_usdcnh">—</span>
+      </div>
+    </div>
+
+    <!-- Iron ore -->
+    <div class="beta-row" data-driver="iron" data-unit="pct" data-sign="1">
+      <div class="beta-label"><span class="dot" style="background:#e09438"></span>Iron ore</div>
+      <div class="beta-stat">
+        <span class="beta-val" id="beta_val_iron">—</span>
+        <span class="beta-badge" id="beta_badge_iron"></span>
+      </div>
+      <div class="beta-slider-wrap">
+        <input type="range" class="beta-slider" id="beta_sl_iron"
+               min="-50" max="50" value="0" step="1">
+        <span class="beta-slider-label" id="beta_sllbl_iron">0.0%</span>
+      </div>
+      <div class="beta-implied">
+        <span class="beta-arrow" id="beta_arr_iron">→</span>
+        <span class="beta-impl-val" id="beta_impl_iron">—</span>
+      </div>
+    </div>
+
+  </div><!-- /beta_rows -->
+
+  <!-- Summary bar -->
+  <div id="beta_summary" style="background:rgba(240,179,41,0.05);border:1px solid rgba(240,179,41,0.18);border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+    <div>
+      <div style="font-size:0.6rem;color:var(--text-faint);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">Current AUD/USD</div>
+      <div id="beta_current" style="font-family:'Fraunces',serif;font-size:1.4rem;font-weight:600;color:var(--text)">—</div>
+    </div>
+    <div style="font-size:1.4rem;color:var(--text-faint)">→</div>
+    <div>
+      <div style="font-size:0.6rem;color:var(--text-faint);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">Net move</div>
+      <div id="beta_net" style="font-family:'Fraunces',serif;font-size:1.4rem;font-weight:600;color:var(--text)">0.00%</div>
+    </div>
+    <div style="font-size:1.4rem;color:var(--text-faint)">→</div>
+    <div>
+      <div style="font-size:0.6rem;color:var(--text-faint);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">Implied AUD/USD</div>
+      <div id="beta_implied_total" style="font-family:'Fraunces',serif;font-size:1.4rem;font-weight:600;color:var(--gold)">—</div>
+    </div>
+    <button id="beta_resetBtn" style="margin-left:auto;font-family:inherit;font-size:11px;letter-spacing:.06em;color:var(--text-faint);background:transparent;border:1px solid var(--panel-edge);padding:6px 14px;border-radius:16px;cursor:pointer">Reset</button>
+  </div>
+
+</div>
+<p class="source" style="margin-top:12px">Rolling OLS: AUD/USD log-returns ~ DXY + AU&ndash;US 2y spread (&Delta;bp, lagged 1d) + S&amp;P 500 + USD/CNY + iron ore · all log-returns except spread · 252d / 60d window · daily data · Yahoo Finance, RBA F2, Alpha Vantage. &sigma; bands are trailing 252d mean &plusmn; std of rolling betas. Fat-tail caveat: &plusmn;2&sigma; breaches occur more often than 1-in-20 for financial data.</p>
+"""
+
+BETA_CSS = """
+/* ── BETA SENSITIVITY PANEL ── */
+.beta-row{display:grid;grid-template-columns:130px 120px 1fr 100px;align-items:center;gap:10px}
+@media(max-width:640px){.beta-row{grid-template-columns:100px 100px 1fr 80px;gap:6px}}
+.beta-label{display:flex;align-items:center;font-size:0.78rem;color:var(--text-dim)}
+.beta-stat{display:flex;align-items:center;gap:7px}
+.beta-val{font-family:'IBM Plex Mono',monospace;font-size:0.85rem;color:var(--text);min-width:58px}
+.beta-badge{font-size:0.58rem;letter-spacing:.06em;padding:2px 7px;border-radius:10px;white-space:nowrap}
+.beta-badge.sig2{background:rgba(240,148,56,0.18);color:var(--amber);border:1px solid rgba(240,148,56,0.35)}
+.beta-badge.sig1{background:rgba(122,146,180,0.12);color:var(--text-faint);border:1px solid rgba(122,146,180,0.25)}
+.beta-badge.nodta{background:rgba(61,82,112,0.15);color:var(--text-faint);font-style:italic}
+.beta-slider-wrap{display:flex;align-items:center;gap:10px}
+.beta-slider{-webkit-appearance:none;appearance:none;width:100%;height:4px;background:var(--panel-edge);border-radius:4px;outline:none;cursor:pointer}
+.beta-slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--gold);border:2px solid var(--ink-2);cursor:grab;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+.beta-slider::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--gold);border:2px solid var(--ink-2);cursor:grab}
+.beta-slider-label{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--gold);min-width:52px;text-align:right}
+.beta-implied{text-align:right}
+.beta-arrow{color:var(--text-faint);margin-right:4px;font-size:0.75rem}
+.beta-impl-val{font-family:'IBM Plex Mono',monospace;font-size:0.82rem}
+.beta-impl-pos{color:#2fcb9a}.beta-impl-neg{color:#f05a52}.beta-impl-zero{color:var(--text-faint)}
+.beta-slider:disabled{opacity:0.3;cursor:not-allowed}
+"""
+
+BETA_INIT_SCRIPT = """<script>
+(function() {
+  var DRIVERS = ['dxy','spread','spx','usdcnh','iron'];
+  var UNITS   = {dxy:'pct',spread:'bp',spx:'pct',usdcnh:'pct',iron:'pct'};
+  var activeLatest = LATEST_BETAS_252;
+  var currentAUD   = null;
+
+  function setCurrentAUD(v) {
+    currentAUD = v;
+    var el = document.getElementById('beta_current');
+    if (el) el.textContent = v ? v.toFixed(4) : '—';
+  }
+
+  function betaFlagBadge(name, latest) {
+    var d = latest[name]; if (!d) return null;
+    var b = d.beta, mu = d.mean, u2 = d.u2, l2 = d.l2, u1 = d.u1, l1 = d.l1;
+    if (b === null || b === undefined) return null;
+    if (u2 !== null && (b > u2 || b < l2)) return {cls:'sig2', txt:'outside ±2σ'};
+    if (u1 !== null && (b > u1 || b < l1)) return {cls:'sig1', txt:'near ±1σ'};
+    return null;
+  }
+
+  function renderBetas(latest) {
+    if (!latest || !latest.dxy) return;
+    var r2 = latest.r2;
+    document.getElementById('beta_r2').textContent = r2 !== null && r2 !== undefined ? r2.toFixed(3) : '—';
+    document.getElementById('beta_r2_pct').textContent = r2 !== null && r2 !== undefined ? (r2*100).toFixed(1)+'%' : '—';
+
+    DRIVERS.forEach(function(name) {
+      var d = latest[name];
+      var valEl   = document.getElementById('beta_val_'+name);
+      var badgeEl = document.getElementById('beta_badge_'+name);
+      var slEl    = document.getElementById('beta_sl_'+name);
+      if (!valEl) return;
+
+      if (!d || d.beta === null || d.beta === undefined) {
+        valEl.textContent = 'n/a';
+        valEl.style.color = 'var(--text-faint)';
+        badgeEl.textContent = 'no data';
+        badgeEl.className = 'beta-badge nodta';
+        if (slEl) slEl.disabled = true;
+        return;
+      }
+      slEl && (slEl.disabled = false);
+      valEl.textContent = (d.beta >= 0 ? '+' : '') + d.beta.toFixed(4);
+      valEl.style.color = 'var(--text)';
+      var flag = betaFlagBadge(name, latest);
+      if (flag) {
+        badgeEl.textContent = flag.txt;
+        badgeEl.className = 'beta-badge ' + flag.cls;
+      } else {
+        badgeEl.textContent = '';
+        badgeEl.className = 'beta-badge';
+      }
+    });
+    recalc();
+  }
+
+  function recalc() {
+    var latest = activeLatest;
+    if (!latest) return;
+    var totalLR = 0;
+    DRIVERS.forEach(function(name) {
+      var slEl  = document.getElementById('beta_sl_'+name);
+      var lblEl = document.getElementById('beta_sllbl_'+name);
+      var arrEl = document.getElementById('beta_arr_'+name);
+      var impEl = document.getElementById('beta_impl_'+name);
+      if (!slEl || slEl.disabled) { if(impEl){impEl.textContent='—';impEl.className='beta-impl-val beta-impl-zero';} return; }
+
+      var raw = +slEl.value;
+      var unit = UNITS[name];
+      var labelTxt = unit === 'bp' ? raw+' bp' : (raw/10).toFixed(1)+'%';
+      if (lblEl) lblEl.textContent = labelTxt;
+
+      var d = latest[name];
+      if (!d || d.beta === null || d.beta === undefined) { if(impEl){impEl.textContent='—';impEl.className='beta-impl-val beta-impl-zero';} return; }
+
+      // beta is AUD/USD log-return per unit of driver log-return (or per 1bp for spread)
+      var driverMove = unit === 'bp' ? raw : raw / 10 / 100;  // convert slider units
+      var lr = d.beta * driverMove;
+      totalLR += lr;
+
+      var pctMove = (Math.exp(lr) - 1) * 100;
+      if (impEl) {
+        if (Math.abs(pctMove) < 0.001) {
+          impEl.textContent = '—'; impEl.className = 'beta-impl-val beta-impl-zero';
+        } else {
+          impEl.textContent = (pctMove >= 0 ? '+' : '') + pctMove.toFixed(3) + '%';
+          impEl.className = 'beta-impl-val ' + (pctMove >= 0 ? 'beta-impl-pos' : 'beta-impl-neg');
+        }
+      }
+      if (arrEl) arrEl.style.color = Math.abs(pctMove) < 0.001 ? 'var(--text-faint)' : (pctMove >= 0 ? '#2fcb9a' : '#f05a52');
+    });
+
+    var netPct = (Math.exp(totalLR) - 1) * 100;
+    var netEl = document.getElementById('beta_net');
+    if (netEl) {
+      netEl.textContent = (netPct >= 0 ? '+' : '') + netPct.toFixed(3) + '%';
+      netEl.style.color = Math.abs(netPct) < 0.001 ? 'var(--text)' : (netPct >= 0 ? '#2fcb9a' : '#f05a52');
+    }
+    var impTot = document.getElementById('beta_implied_total');
+    if (impTot && currentAUD) {
+      var implied = currentAUD * Math.exp(totalLR);
+      impTot.textContent = implied.toFixed(4);
+      impTot.style.color = Math.abs(netPct) < 0.001 ? 'var(--gold)' :
+        (netPct >= 0 ? '#2fcb9a' : '#f05a52');
+    } else if (impTot) { impTot.textContent = '—'; }
+  }
+
+  // Wire sliders
+  DRIVERS.forEach(function(name) {
+    var slEl = document.getElementById('beta_sl_'+name);
+    if (slEl) slEl.addEventListener('input', recalc);
+  });
+
+  // Reset button
+  var resetBtn = document.getElementById('beta_resetBtn');
+  if (resetBtn) resetBtn.addEventListener('click', function() {
+    DRIVERS.forEach(function(name) {
+      var sl = document.getElementById('beta_sl_'+name);
+      if (sl) { sl.value = 0; sl.disabled = false; }
+      var lbl = document.getElementById('beta_sllbl_'+name);
+      if (lbl) lbl.textContent = UNITS[name]==='bp' ? '0 bp' : '0.0%';
+      var imp = document.getElementById('beta_impl_'+name);
+      if (imp) { imp.textContent='—'; imp.className='beta-impl-val beta-impl-zero'; }
+      var arr = document.getElementById('beta_arr_'+name);
+      if (arr) arr.style.color='var(--text-faint)';
+    });
+    var netEl = document.getElementById('beta_net');
+    if (netEl) { netEl.textContent='0.00%'; netEl.style.color='var(--text)'; }
+    var imp = document.getElementById('beta_implied_total');
+    if (imp && currentAUD) { imp.textContent=currentAUD.toFixed(4); imp.style.color='var(--gold)'; }
+  });
+
+  // Window toggle
+  document.getElementById('beta_toggleBtns').addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-w]'); if (!btn) return;
+    this.querySelectorAll('.preset').forEach(function(b){b.classList.remove('active');});
+    btn.classList.add('active');
+    activeLatest = btn.dataset.w === '252' ? LATEST_BETAS_252 : LATEST_BETAS_60;
+    renderBetas(activeLatest);
+  });
+
+  // Init — expose setCurrentAUD for inline call after AUD/USD value is known
+  window._betaSetAUD = setCurrentAUD;
+  renderBetas(activeLatest);
+})();
+</script>"""
+
 # ---------------------------------------------------------------------------
 # HTML TEMPLATE
 # ---------------------------------------------------------------------------
@@ -1570,6 +2127,7 @@ body {{
   gap: 8px;
 }}
 {CHART_CSS}
+{BETA_CSS}
 </style>
 </head>
 <body>
@@ -1723,6 +2281,18 @@ body {{
 <div style="background:var(--surface);border:1px solid var(--panel-edge);border-radius:12px;padding:22px 26px 18px">
   {CORR_CHART_HTML}
 </div>
+
+
+<!-- ─── BETA SENSITIVITY ─── -->
+<div class="section-header" style="margin-top:36px">
+  <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">BETA SENSITIVITY</span>
+  <div class="sec-line"></div>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--panel-edge);border-radius:12px;padding:22px 26px 18px">
+  {BETA_PANEL_HTML}
+</div>
+<script>if(window._betaSetAUD) _betaSetAUD({data['audusd']:.4f});</script>
 
 
 <!-- ─── 02 RATE DIFFERENTIALS ─── -->
@@ -2026,6 +2596,9 @@ body {{
 
 {corr_data_script}
 {CORR_INIT_SCRIPT}
+
+{beta_data_script}
+{BETA_INIT_SCRIPT}
 
 </body>
 </html>
