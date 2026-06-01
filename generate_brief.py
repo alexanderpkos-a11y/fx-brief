@@ -12,6 +12,7 @@ import csv
 import io
 import math
 import bisect
+import urllib.request
 import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -71,26 +72,33 @@ def _yf_history(ticker, range_str='10y'):
         print(f'  [WARN] YF history {ticker}: {e}')
     return {}
 
-def _fetch_us2y_av():
-    """Alpha Vantage US 2y Treasury yield (daily). Returns (rate_float, date_str, hist_dict)."""
+def _fetch_us2y_fred():
+    """FRED DGS2 – US 2y Treasury yield (daily, no API key required).
+    Returns (rate_float, date_str, hist_dict)."""
     try:
-        raw = _curl_get(
-            f'https://www.alphavantage.co/query?function=TREASURY_YIELD'
-            f'&interval=daily&maturity=2year&apikey={AV_API_KEY}'
+        req = urllib.request.Request(
+            'https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS2',
+            headers={'User-Agent': 'python-urllib/3'}
         )
-        series = json.loads(raw).get('data', [])
-        if series:
-            rate = float(series[0]['value'])
-            date_str = series[0]['date']
-            hist = {}
-            for pt in series:
-                try:
-                    hist[pt['date']] = float(pt['value'])
-                except (ValueError, KeyError):
-                    pass
-            return rate, date_str, hist
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode('utf-8')
+        hist = {}
+        for line in raw.splitlines():
+            if not line.strip() or ',' not in line:
+                continue
+            parts = line.split(',')
+            val = parts[1].strip()
+            if val in ('.', '', 'DGS2'):
+                continue
+            try:
+                hist[parts[0].strip()] = float(val)
+            except ValueError:
+                pass
+        if hist:
+            last_date = max(hist)
+            return hist[last_date], last_date, hist
     except Exception as e:
-        print(f'  [WARN] Alpha Vantage US2y: {e}')
+        print(f'  [WARN] FRED DGS2: {e}')
     return None, None, {}
 
 def _fetch_rba_f2():
@@ -515,8 +523,8 @@ print('Fetching AU yields (RBA F2)…')
 au2y, au2y_prev, au10y, au10y_prev, _f2_date, _au2y_hist = _fetch_rba_f2()
 print(f'  AU2y={au2y}  AU10y={au10y}  ({_f2_date})  hist={len(_au2y_hist)}d')
 
-print('Fetching US 2y yield (Alpha Vantage)…')
-_us2y_raw, _us2y_date_raw, _us2y_hist = _fetch_us2y_av()
+print('Fetching US 2y yield (FRED DGS2)…')
+_us2y_raw, _us2y_date_raw, _us2y_hist = _fetch_us2y_fred()
 us2y      = _us2y_raw
 us2y_date = (datetime.strptime(_us2y_date_raw, '%Y-%m-%d').strftime('%d %b')
              if _us2y_date_raw else '?')
@@ -914,7 +922,7 @@ RD_CHART_HTML = """
     </div>
   </div>
 </div>
-<p class="source" id="rd_source">Source: Alpha Vantage (AUD/USD, US 2y) &middot; RBA Table F2 (AU 2y) &middot; spread = (AU 2y &minus; US 2y) &times; 100 bp.</p>
+<p class="source" id="rd_source">Source: FRED (US 2y) &middot; RBA Table F2 (AU 2y) &middot; spread = (AU 2y &minus; US 2y) &times; 100 bp.</p>
 """
 
 # Section 03 chart markup (the live COT chart; hard-stat cards follow below it).
@@ -965,7 +973,7 @@ COT_CHART_HTML = """
     </div>
   </div>
 </div>
-<p class="source">Source: CFTC TFF Futures-Only (positioning) &middot; Alpha Vantage (AUD/USD) &middot; net = long &minus; short contracts. Weekly, Tuesday close.</p>
+<p class="source">Source: CFTC TFF Futures-Only (positioning) &middot; Yahoo Finance (AUD/USD) &middot; net = long &minus; short contracts. Weekly, Tuesday close.</p>
 """
 
 # Section: Correlation history chart (10-year rolling Pearson vs AUD/USD)
@@ -1039,7 +1047,7 @@ CORR_CHART_HTML = """
     <div id="corr_tag_dxy" style="font-size:0.6rem;color:var(--text-faint);margin-top:5px">&nbsp;</div>
   </div>
 </div>
-<p class="source" style="margin-top:12px">AUD/USD: 252-day trailing mean &plusmn;1&sigma;&thinsp;/&thinsp;2&sigma; bands (RHS) &middot; Correlations: rolling Pearson vs AUD/USD log-returns or spread &Delta;bp (LHS) &middot; weekly sampled &middot; Yahoo Finance, RBA F2, Alpha Vantage.</p>
+<p class="source" style="margin-top:12px">AUD/USD: 252-day trailing mean &plusmn;1&sigma;&thinsp;/&thinsp;2&sigma; bands (RHS) &middot; Correlations: rolling Pearson vs AUD/USD log-returns or spread &Delta;bp (LHS) &middot; weekly sampled &middot; Yahoo Finance, RBA F2, FRED.</p>
 """
 
 # Chart init script for the correlation history chart (regular string — no f-string escaping needed)
@@ -1274,7 +1282,7 @@ DRIVER_PANEL_HTML = """
   </div>
 </div>
 
-<p class="source" style="margin-top:10px">Rolling OLS: AUD/USD weekly log-returns ~ AU&ndash;US 2y spread (&Delta;bp) + S&amp;P 500 + USD/CNY + iron ore &middot; 2Y / 1Y trailing window (weekly data) &middot; DXY excluded (collinear with USD/CNY) &middot; Yahoo Finance, RBA F2, Alpha Vantage. Latest week&rsquo;s attribution uses 2Y betas &times; actual driver moves. &sigma; bands are trailing 1Y mean &plusmn; std of rolling betas.</p>
+<p class="source" style="margin-top:10px">Rolling OLS: AUD/USD weekly log-returns ~ AU&ndash;US 2y spread (&Delta;bp) + S&amp;P 500 + USD/CNY + iron ore &middot; 2Y / 1Y trailing window (weekly data) &middot; DXY excluded (collinear with USD/CNY) &middot; Yahoo Finance, RBA F2, FRED. Latest week&rsquo;s attribution uses 2Y betas &times; actual driver moves. &sigma; bands are trailing 1Y mean &plusmn; std of rolling betas.</p>
 """
 
 DRIVER_CSS = """
