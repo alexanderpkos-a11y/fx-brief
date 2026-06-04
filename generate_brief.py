@@ -74,14 +74,14 @@ def _yf_history(ticker, range_str='10y'):
 
 def _fetch_us2y_fred():
     """FRED DGS2 – US 2y Treasury yield (daily, no API key required).
+    Uses curl with no custom User-Agent (FRED blocks browser UAs).
     Returns (rate_float, date_str, hist_dict)."""
     try:
-        req = urllib.request.Request(
-            'https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS2',
-            headers={'User-Agent': 'python-urllib/3'}
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            raw = resp.read().decode('utf-8')
+        raw = subprocess.run(
+            ['curl', '-s', '-L', '--max-time', '30',
+             'https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS2'],
+            capture_output=True, text=True
+        ).stdout
         hist = {}
         for line in raw.splitlines():
             if not line.strip() or ',' not in line:
@@ -282,6 +282,41 @@ def _compute_rolling_corr_series(aud_hist, driver_hists, use_diffs, window=20, s
         records.append(rec)
     return records
 
+def _build_driver_series(aud_hist, driver_hists, sample_every=5):
+    """Per-driver chart series: {name: [{date, aud, drv, r20, r60}...]}.
+    aud and drv are raw price levels; r20/r60 are rolling Pearson correlations
+    of log-returns (sampled every sample_every trading days)."""
+    results = {}
+    for name, hist in driver_hists.items():
+        common = sorted(set(aud_hist) & set(hist))
+        if len(common) < 22:
+            results[name] = []
+            continue
+        aud_r = [math.log(aud_hist[common[i]] / aud_hist[common[i-1]])
+                 for i in range(1, len(common))]
+        drv_r = [math.log(hist[common[i]] / hist[common[i-1]])
+                 for i in range(1, len(common))]
+        ret_dates = common[1:]
+        records = []
+        for i in range(len(ret_dates)):
+            if i % sample_every != 0 and i < len(ret_dates) - 1:
+                continue
+            d = ret_dates[i]
+            def _r(win, _i=i):
+                if _i < win:
+                    return None
+                r = _pearson(aud_r[_i-win:_i], drv_r[_i-win:_i])
+                return round(r, 3) if r is not None else None
+            records.append({
+                'date': d,
+                'aud':  round(aud_hist[d], 4) if d in aud_hist else None,
+                'drv':  round(hist[d], 2)     if d in hist      else None,
+                'r20':  _r(20),
+                'r60':  _r(60),
+            })
+        results[name] = records
+    return results
+
 # ---------------------------------------------------------------------------
 # ROLLING OLS BETA PIPELINE
 # ---------------------------------------------------------------------------
@@ -312,7 +347,13 @@ def _to_returns_df(aud_hist, driver_hists):
     spx_r    = dict(_log_returns(_week_end_hist(spx_hist)))
     usdcnh_r = dict(_log_returns(_week_end_hist(usdcnh_hist)))
     iron_r   = dict(_log_returns(_week_end_hist(iron_hist)))
-    spread_d = dict(_first_diffs(_week_end_hist(spread_hist)))  # weekly Δbp
+    spread_d = dict(_first_diffs(_week_end_hist(spread_hist)))
+
+    # Index spread by ISO week so AU public holidays don't cause date mismatches
+    # (AU week-end may be Thu when US/YF week-end is Fri for the same ISO week)
+    spread_by_week = {}
+    for d, v in spread_d.items():
+        spread_by_week[datetime.strptime(d, '%Y-%m-%d').strftime('%G-%V')] = v
 
     all_dates = sorted(set(aud_r) & set(spx_r) & set(usdcnh_r))
     # iron allowed to be missing pre-2013 — filled with NaN
@@ -320,7 +361,7 @@ def _to_returns_df(aud_hist, driver_hists):
     dates_out, y_out, X_rows = [], [], []
     for d in all_dates:
         y  = aud_r.get(d)
-        xs = spread_d.get(d)   # may be None if spread missing
+        xs = spread_by_week.get(datetime.strptime(d, '%Y-%m-%d').strftime('%G-%V'))  # match by ISO week
         xp = spx_r.get(d)
         xc = usdcnh_r.get(d)
         xi = iron_r.get(d)     # may be None pre-2013
@@ -578,6 +619,13 @@ print(f'  20d series: {len(_corr_series_20)} records  |  60d series: {len(_corr_
 _c20j = json.dumps(_corr_series_20, separators=(',', ':'))
 _c60j = json.dumps(_corr_series_60, separators=(',', ':'))
 corr_data_script = f'<script>\nvar CORR20_SERIES={_c20j};\nvar CORR60_SERIES={_c60j};\n</script>'
+
+print('Building per-driver chart series…')
+_chart_driver_hists = {'spx': _hist_results.get('spx', {})}
+_driver_series = _build_driver_series(_hist_results.get('audusd', {}), _chart_driver_hists)
+print(f'  spx: {len(_driver_series.get("spx", []))} records')
+_driver_series_j = json.dumps(_driver_series, separators=(',', ':'))
+driver_series_script = f'<script>\nvar DRIVER_SERIES={_driver_series_j};\n</script>'
 
 # ---------------------------------------------------------------------------
 # ROLLING OLS BETAS
@@ -1245,6 +1293,205 @@ CORR_INIT_SCRIPT = """<script>
     var cutoff=Date.now()-365*864e5;
     var idx=activeSeries.findIndex(function(r){return new Date(r.date).getTime()>=cutoff;});
     corrMin.value=idx<0?0:idx; corrMax.value=N; corrApply();
+  })();
+})();
+</script>"""
+
+# ---------------------------------------------------------------------------
+# AUD/USD vs S&P 500 individual chart
+# ---------------------------------------------------------------------------
+DC_SPX_HTML = """
+<div class="stats">
+  <div class="card">
+    <div class="lbl"><span class="dot aud"></span>AUD/USD &mdash; latest</div>
+    <div class="val" id="dc_spx_audVal">&mdash;</div>
+    <div class="chg" id="dc_spx_audChg">&mdash;</div>
+  </div>
+  <div class="card">
+    <div class="lbl" style="color:#2fcb9a">S&amp;P 500 &mdash; latest</div>
+    <div class="val" id="dc_spx_drvVal">&mdash;</div>
+    <div class="chg" id="dc_spx_drvChg">&mdash;</div>
+  </div>
+  <div class="card">
+    <div class="lbl">Window correlation</div>
+    <div class="val" id="dc_spx_corrVal">&mdash;</div>
+    <div id="dc_spx_corrToggle" class="presets" style="margin-top:8px">
+      <button class="preset active" data-w="20">20d</button>
+      <button class="preset" data-w="60">60d</button>
+    </div>
+  </div>
+</div>
+
+<div class="panel-box">
+  <div class="panel-title">AUD/USD and S&amp;P 500</div>
+  <div class="legend">
+    <span><span class="dot aud"></span>AUD/USD (LHS)</span>
+    <span><span class="dot" style="background:#2fcb9a"></span>S&amp;P 500 (RHS)</span>
+  </div>
+  <div class="chart-holder"><canvas id="dc_spx_chart"></canvas></div>
+
+  <div class="slider-wrap">
+    <div class="slider-head">
+      <div class="k">Date range</div>
+      <div class="range-readout"><b id="dc_spx_start">&mdash;</b> &nbsp;&rarr;&nbsp; <b id="dc_spx_end">&mdash;</b></div>
+    </div>
+    <div class="dual">
+      <div class="track"></div>
+      <div class="track-fill" id="dc_spx_fill"></div>
+      <input type="range" id="dc_spx_minR" min="0" max="100" value="0">
+      <input type="range" id="dc_spx_maxR" min="0" max="100" value="100">
+    </div>
+    <div class="presets" id="dc_spx_presets">
+      <button class="preset active" data-y="1">1Y</button>
+      <button class="preset" data-y="2">2Y</button>
+      <button class="preset" data-y="5">5Y</button>
+      <button class="preset" data-y="0">Max</button>
+    </div>
+  </div>
+</div>
+<p class="source">Source: Yahoo Finance. Rolling Pearson correlation of log-returns vs AUD/USD, selected date range.</p>
+"""
+
+DC_SPX_SCRIPT = """<script>
+(function(){
+  var SER = DRIVER_SERIES['spx'];
+  if (!SER || !SER.length) return;
+  var N = SER.length;
+  var activeCorrKey = 'r20';
+
+  var audValEl  = document.getElementById('dc_spx_audVal');
+  var audChgEl  = document.getElementById('dc_spx_audChg');
+  var drvValEl  = document.getElementById('dc_spx_drvVal');
+  var drvChgEl  = document.getElementById('dc_spx_drvChg');
+  var corrValEl = document.getElementById('dc_spx_corrVal');
+  var startEl   = document.getElementById('dc_spx_start');
+  var endEl     = document.getElementById('dc_spx_end');
+  var fillEl    = document.getElementById('dc_spx_fill');
+  var minR      = document.getElementById('dc_spx_minR');
+  var maxR      = document.getElementById('dc_spx_maxR');
+  minR.max = maxR.max = N - 1;
+
+  var AUD_COLOR = '#5b9bd5';
+  var SPX_COLOR = '#2fcb9a';
+
+  var chart = new Chart(document.getElementById('dc_spx_chart').getContext('2d'), {
+    type: 'line',
+    data: { labels: [], datasets: [
+      { label: 'AUD/USD', data: [], borderColor: AUD_COLOR, borderWidth: 1.5,
+        pointRadius: 0, tension: 0.2, spanGaps: true, yAxisID: 'y_aud' },
+      { label: 'S&P 500', data: [], borderColor: SPX_COLOR, borderWidth: 1.5,
+        pointRadius: 0, tension: 0.2, spanGaps: true, yAxisID: 'y_drv' },
+    ]},
+    options: {
+      animation: false, responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { ticks: { maxTicksLimit: 8, color: 'rgba(255,255,255,.35)', font: { size: 11 } },
+             grid: { color: 'rgba(142,162,189,.08)' } },
+        y_aud: { position: 'left',
+                 ticks: { color: AUD_COLOR, font: { size: 11 },
+                          callback: function(v){ return v.toFixed(4); } },
+                 grid: { color: 'rgba(142,162,189,.08)' } },
+        y_drv: { position: 'right',
+                 grid: { drawOnChartArea: false },
+                 ticks: { color: SPX_COLOR, font: { size: 11 },
+                          callback: function(v){ return v >= 1000 ? (v/1000).toFixed(1)+'k' : v.toFixed(0); } } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(10,18,35,.92)', borderColor: 'rgba(255,255,255,.1)',
+          borderWidth: 1, titleColor: 'rgba(255,255,255,.6)', bodyColor: '#fff',
+          callbacks: {
+            label: function(ctx) {
+              if (ctx.datasetIndex === 0) return ' AUD/USD: ' + (ctx.raw || 0).toFixed(4);
+              return ' S&P 500: ' + Math.round(ctx.raw || 0).toLocaleString();
+            }
+          }
+        }
+      }
+    }
+  });
+
+  function fmtPct(val, prev) {
+    if (!val || !prev) return '';
+    var p = (val - prev) / prev * 100;
+    return (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
+  }
+
+  function applySlice() {
+    var lo = parseInt(minR.value), hi = parseInt(maxR.value) + 1;
+    if (hi > N) hi = N;
+    if (lo >= hi - 1) lo = Math.max(0, hi - 2);
+    var slice = SER.slice(lo, hi);
+
+    chart.data.labels            = slice.map(function(r){ return r.date; });
+    chart.data.datasets[0].data  = slice.map(function(r){ return r.aud; });
+    chart.data.datasets[1].data  = slice.map(function(r){ return r.drv; });
+    chart.update('none');
+
+    var last = slice[slice.length - 1] || {};
+    var prev = slice[slice.length - 2] || {};
+    audValEl.textContent = last.aud ? last.aud.toFixed(4) : '\\u2014';
+    audChgEl.textContent = fmtPct(last.aud, prev.aud) || '\\u2014';
+    drvValEl.textContent = last.drv ? Math.round(last.drv).toLocaleString() : '\\u2014';
+    drvChgEl.textContent = fmtPct(last.drv, prev.drv) || '\\u2014';
+
+    var corrs = slice.map(function(r){ return r[activeCorrKey]; })
+                     .filter(function(v){ return v != null; });
+    var avg = corrs.length ? corrs.reduce(function(a,b){ return a+b; }, 0) / corrs.length : null;
+    corrValEl.textContent = avg !== null ? avg.toFixed(2) : '\\u2014';
+    corrValEl.style.color = avg === null ? '' : (avg > 0.1 ? '#6fcf8e' : avg < -0.1 ? '#e8746a' : 'var(--text)');
+
+    startEl.textContent = (slice[0] || {}).date || '\\u2014';
+    endEl.textContent   = last.date || '\\u2014';
+
+    var pLo = lo / (N - 1) * 100, pHi = parseInt(maxR.value) / (N - 1) * 100;
+    fillEl.style.left  = pLo + '%';
+    fillEl.style.width = (pHi - pLo) + '%';
+  }
+
+  minR.addEventListener('input', function(){
+    if (parseInt(minR.value) >= parseInt(maxR.value)) minR.value = parseInt(maxR.value) - 1;
+    applySlice();
+  });
+  maxR.addEventListener('input', function(){
+    if (parseInt(maxR.value) <= parseInt(minR.value)) maxR.value = parseInt(minR.value) + 1;
+    applySlice();
+  });
+
+  document.getElementById('dc_spx_presets').addEventListener('click', function(e){
+    var btn = e.target.closest('[data-y]');
+    if (!btn) return;
+    var yrs = parseInt(btn.dataset.y), lo = 0;
+    if (yrs > 0) {
+      var cutoff = new Date(SER[N-1].date);
+      cutoff.setFullYear(cutoff.getFullYear() - yrs);
+      var ct = cutoff.toISOString().slice(0,10);
+      for (var i = 0; i < N; i++) { if (SER[i].date >= ct) { lo = i; break; } }
+    }
+    minR.value = lo; maxR.value = N - 1;
+    document.querySelectorAll('#dc_spx_presets .preset').forEach(function(b){ b.classList.remove('active'); });
+    btn.classList.add('active');
+    applySlice();
+  });
+
+  document.getElementById('dc_spx_corrToggle').addEventListener('click', function(e){
+    var btn = e.target.closest('[data-w]');
+    if (!btn) return;
+    activeCorrKey = btn.dataset.w === '60' ? 'r60' : 'r20';
+    document.querySelectorAll('#dc_spx_corrToggle .preset').forEach(function(b){ b.classList.remove('active'); });
+    btn.classList.add('active');
+    applySlice();
+  });
+
+  (function(){
+    var cutoff = new Date(SER[N-1].date);
+    cutoff.setFullYear(cutoff.getFullYear() - 1);
+    var ct = cutoff.toISOString().slice(0,10), lo = 0;
+    for (var i = 0; i < N; i++) { if (SER[i].date >= ct) { lo = i; break; } }
+    minR.value = lo; maxR.value = N - 1;
+    applySlice();
   })();
 })();
 </script>"""
@@ -2042,6 +2289,17 @@ body {{
 </div>
 
 
+<!-- ─── AUD/USD vs S&P 500 ─── -->
+<div class="section-header" style="margin-top:36px">
+  <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">AUD/USD &amp; S&amp;P 500</span>
+  <div class="sec-line"></div>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--panel-edge);border-radius:12px;padding:22px 26px 18px">
+  {DC_SPX_HTML}
+</div>
+
+
 <!-- ─── WHAT'S DRIVING AUD/USD ─── -->
 <div class="section-header" style="margin-top:36px">
   <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">WHAT&rsquo;S DRIVING AUD/USD</span>
@@ -2368,6 +2626,9 @@ body {{
 
 {corr_data_script}
 {CORR_INIT_SCRIPT}
+
+{driver_series_script}
+{DC_SPX_SCRIPT}
 
 {beta_data_script}
 {DRIVER_INIT_SCRIPT}
