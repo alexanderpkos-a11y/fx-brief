@@ -276,7 +276,7 @@ PRINT_DIAGNOSTICS = os.environ.get('PRINT_DIAGNOSTICS', '').lower() in ('1', 'tr
 # ---------------------------------------------------------------------------
 YF_TICKERS = {
     'audusd':   'AUDUSD=X',
-    'audjpy':   'AUDJPY=X',
+    'audcny':   'AUDCNY=X',
     'dxy':      'DX-Y.NYB',
     'usdcnh':   'CNH=X',
     'gold':     'GC=F',
@@ -387,8 +387,8 @@ def _g(key, idx=0, fallback=None):
 data = {
     'audusd':      _g('audusd',  0, 0.7186),
     'audusd_prev': _g('audusd',  1, 0.7164),
-    'audjpy':      _g('audjpy',  0, 114.408),
-    'audjpy_prev': _g('audjpy',  1, 114.060),
+    'audcny':      _g('audcny',  0, 4.640),
+    'audcny_prev': _g('audcny',  1, 4.630),
     'dxy':         _g('dxy',     0, 98.942),
     'dxy_prev':    _g('dxy',     1, 99.020),
     'usdcnh':      _g('usdcnh',  0, 6.7628),
@@ -499,7 +499,7 @@ def data_gap(label="DATA GAP"):
 # PRE-COMPUTE VALUES
 # ---------------------------------------------------------------------------
 audusd_chg  = pct_change(data['audusd'], data['audusd_prev'])
-audjpy_chg  = pct_change(data['audjpy'], data['audjpy_prev'])
+audcny_chg  = pct_change(data['audcny'], data['audcny_prev'])
 dxy_chg     = pct_change(data['dxy'],    data['dxy_prev'])
 gold_chg    = pct_change(data['gold'],   data['gold_prev'])
 copper_chg  = pct_change(data['copper'], data['copper_prev'])
@@ -2055,16 +2055,16 @@ body {{
     </div>
   </div>
 
-  <!-- AUD/JPY -->
+  <!-- AUD/CNY -->
   <div class="tile">
     <div class="tile-top">
-      <span class="tile-label">AUD / JPY</span>
+      <span class="tile-label">AUD / CNY</span>
       {badge('YF')}
     </div>
-    <div class="tile-value green">{data['audjpy']:.3f}</div>
+    <div class="tile-value green">{data['audcny']:.3f}</div>
     <div class="tile-bottom">
-      {change_html(audjpy_chg)}
-      <span class="tile-ref">prev {data['audjpy_prev']:.3f}</span>
+      {change_html(audcny_chg)}
+      <span class="tile-ref">prev {data['audcny_prev']:.3f}</span>
     </div>
   </div>
 
@@ -2566,7 +2566,7 @@ if _gmail_user and _gmail_pass:
   </table>
   <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#0c1525;border:1px solid #1b2d4f;border-top:none;margin-bottom:16px">
     <tr>
-      {_tile('AUD / JPY', f'{data["audjpy"]:.3f}', _ec(audjpy_chg))}
+      {_tile('AUD / CNY', f'{data["audcny"]:.3f}', _ec(audcny_chg))}
       {_tile('USD / CNH', f'{data["usdcnh"]:.4f}', '<span style="color:#7a92b4">offshore RMB</span>')}
       {_tile('VIX', f'{data["vix"]:.2f}', _ec(vix_chg, invert=True))}
     </tr>
