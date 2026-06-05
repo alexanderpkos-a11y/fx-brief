@@ -250,7 +250,7 @@ const RD_SERIES = [{"date":"2016-01-01","audusd":0.7288,"spread":95},{"date":"20
       },
       scales:{
         x:{grid:{color:GRID,drawTicks:false}, ticks:{color:DIM,maxTicksLimit:11,font:{family:'IBM Plex Mono',size:11},
-           callback:function(v){return new Date(this.getLabelForValue(v)).getFullYear();}}},
+           callback:function(v){var d=new Date(this.getLabelForValue(v)+'T00:00:00');return d.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'2-digit'});}}},
         y:{position:'left', grid:{color:GRID}, ticks:{color:AUD,font:{family:'IBM Plex Mono',size:11},callback:v=>v.toFixed(3)}},
         y1:{position:'right', grid:{drawOnChartArea:false}, ticks:{color:SPR,font:{family:'IBM Plex Mono',size:11},callback:v=>(v>0?'+':'')+v}}
       }
@@ -354,7 +354,7 @@ const COT_SERIES = [{"date":"2016-06-07","audusd":0.745,"am_net":14918,"lev_net"
       },
       scales:{
         x:{grid:{color:GRID,drawTicks:false}, ticks:{color:DIM,maxTicksLimit:11,font:{family:'IBM Plex Mono',size:11},
-           callback:function(v){return new Date(this.getLabelForValue(v)).getFullYear();}}},
+           callback:function(v){var d=new Date(this.getLabelForValue(v)+'T00:00:00');return d.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'2-digit'});}}},
         y:{position:'left', grid:{color:GRID}, ticks:{color:AUD,font:{family:'IBM Plex Mono',size:11},callback:v=>v.toFixed(3)}},
         y1:{position:'right', grid:{drawOnChartArea:false}, ticks:{color:DIM,font:{family:'IBM Plex Mono',size:11},callback:v=>fmtK(v)}}
       }
