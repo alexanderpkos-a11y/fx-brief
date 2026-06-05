@@ -2111,6 +2111,7 @@ body {{
 
 <!-- ─── AUD/USD vs S&P 500 ─── -->
 <div class="section-header" style="margin-top:36px">
+  <span class="sec-num">02</span>
   <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">AUD/USD &amp; S&amp;P 500</span>
   <div class="sec-line"></div>
 </div>
@@ -2122,6 +2123,7 @@ body {{
 
 <!-- ─── AUD/USD vs USD/CNY ─── -->
 <div class="section-header" style="margin-top:36px">
+  <span class="sec-num">03</span>
   <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">AUD/USD &amp; USD/CNY</span>
   <div class="sec-line"></div>
 </div>
@@ -2133,6 +2135,7 @@ body {{
 
 <!-- ─── AUD/USD vs Iron Ore ─── -->
 <div class="section-header" style="margin-top:36px">
+  <span class="sec-num">04</span>
   <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">AUD/USD &amp; IRON ORE</span>
   <div class="sec-line"></div>
 </div>
@@ -2144,6 +2147,7 @@ body {{
 
 <!-- ─── AUD/USD vs DXY ─── -->
 <div class="section-header" style="margin-top:36px">
+  <span class="sec-num">05</span>
   <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">AUD/USD &amp; DXY</span>
   <div class="sec-line"></div>
 </div>
@@ -2154,9 +2158,9 @@ body {{
 
 
 
-<!-- ─── 02 RATE DIFFERENTIALS ─── -->
+<!-- ─── 06 RATE DIFFERENTIALS ─── -->
 <div class="section-header">
-  <span class="sec-num">02</span>
+  <span class="sec-num">06</span>
   <span class="sec-title">Rate Differentials &amp; Yield Curve</span>
   <div class="sec-line"></div>
 </div>
@@ -2165,9 +2169,9 @@ body {{
 
 
 
-<!-- ─── 03 COT POSITIONING ─── -->
+<!-- ─── 07 COT POSITIONING ─── -->
 <div class="section-header">
-  <span class="sec-num">03</span>
+  <span class="sec-num">07</span>
   <span class="sec-title">COT Positioning — CFTC TFF (AUD Futures)</span>
   <div class="sec-line"></div>
 </div>
@@ -2265,9 +2269,9 @@ body {{
 </div>
 
 
-<!-- ─── 04 COMMODITIES & MARKETS ─── -->
+<!-- ─── 08 COMMODITIES & MARKETS ─── -->
 <div class="section-header">
-  <span class="sec-num">04</span>
+  <span class="sec-num">08</span>
   <span class="sec-title">Commodities &amp; Related Markets</span>
   <div class="sec-line"></div>
 </div>
@@ -2338,9 +2342,9 @@ body {{
 </div>
 
 
-<!-- ─── 05 EVENT RISK CALENDAR ─── -->
+<!-- ─── 09 EVENT RISK CALENDAR ─── -->
 <div class="section-header">
-  <span class="sec-num">05</span>
+  <span class="sec-num">09</span>
   <span class="sec-title">Event Risk Calendar</span>
   <div class="sec-line"></div>
 </div>
