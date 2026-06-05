@@ -1446,6 +1446,116 @@ DC_DXY_SCRIPT = """<script>
 # DRIVER ATTRIBUTION PANEL  (replaces slider-based beta sensitivity panel)
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
+# PREVIOUS CALENDAR EVENTS  (last ~30 days — update as events roll through)
+# ---------------------------------------------------------------------------
+PREV_EVENTS_HTML = """
+<table class="events-table">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Event</th>
+      <th>Detail / Outcome</th>
+      <th>Impact</th>
+      <th>AUD Sensitivity</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="event-date">6–7 May</span></td>
+      <td><span class="event-name">RBA Board Meeting</span></td>
+      <td class="event-detail">Held at 4.35%; tone cautiously dovish, data-dependence reiterated. Market moved to price ~20% Jun cut probability post-decision</td>
+      <td><span class="impact-badge impact-high">HIGH</span></td>
+      <td class="dim-text">Primary AUD driver</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">6–7 May</span></td>
+      <td><span class="event-name">FOMC Meeting</span></td>
+      <td class="event-detail">Held at 4.25–4.50%; Powell cited sticky services inflation, no rush to cut. USD firmed on hold signal, AUD offered briefly</td>
+      <td><span class="impact-badge impact-high">HIGH</span></td>
+      <td class="dim-text">Via USD &amp; rate differential</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">9 May</span></td>
+      <td><span class="event-name">China Trade Balance (Apr)</span></td>
+      <td class="event-detail">Exports resilient; imports subdued, signalling weak domestic demand. Mixed read for commodity outlook and iron ore demand</td>
+      <td><span class="impact-badge impact-high">HIGH</span></td>
+      <td class="dim-text">Via CNH &amp; commodity demand</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">13 May</span></td>
+      <td><span class="event-name">US CPI (Apr)</span></td>
+      <td class="event-detail">Core CPI modestly below consensus; USD softened on print, AUD and risk assets recovered. FOMC cut expectations edged forward</td>
+      <td><span class="impact-badge impact-high">HIGH</span></td>
+      <td class="dim-text">Via USD &amp; risk sentiment</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">15 May</span></td>
+      <td><span class="event-name">AU Employment (Apr)</span></td>
+      <td class="event-detail">Labour market softened; unemployment nudged higher, reinforcing RBA cut optionality. Lifted Jun cut probability to ~24%</td>
+      <td><span class="impact-badge impact-high">HIGH</span></td>
+      <td class="dim-text">Direct — RBA reaction function</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">16 May</span></td>
+      <td><span class="event-name">CN Industrial Output / Retail (Apr)</span></td>
+      <td class="event-detail">Industrial output in line with estimates; retail sales below consensus. Soft domestic demand weighed on iron ore and CNH</td>
+      <td><span class="impact-badge impact-med">MED</span></td>
+      <td class="dim-text">Via China demand channel</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">20 May</span></td>
+      <td><span class="event-name">RBA Meeting Minutes</span></td>
+      <td class="event-detail">Minutes showed board discussed case for a cut; dovish lean confirmed. AUD slipped on release as markets firmed Jun cut bets</td>
+      <td><span class="impact-badge impact-med">MED</span></td>
+      <td class="dim-text">Direct — RBA guidance</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">23 May</span></td>
+      <td><span class="event-name">CFTC COT Release (May-20 snapshot)</span></td>
+      <td class="event-detail">Positioning showed AM net longs rebuilding; LF net positioning continued to extend, broadly supportive backdrop for AUD</td>
+      <td><span class="impact-badge impact-med">MED</span></td>
+      <td class="dim-text">Positioning signal</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">27 May</span></td>
+      <td><span class="event-name">US PCE (Apr)</span></td>
+      <td class="event-detail">Core PCE in line with expectations; no fresh hawkish catalyst. Fed cut timing little changed, AUD steady into month-end</td>
+      <td><span class="impact-badge impact-high">HIGH</span></td>
+      <td class="dim-text">Via Fed pricing &amp; USD</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">29–30 May</span></td>
+      <td><span class="event-name">China NBS PMI (May)</span></td>
+      <td class="event-detail">Manufacturing PMI held in expansion; services solid. Positive signal for commodity demand and AUD via China growth channel</td>
+      <td><span class="impact-badge impact-med">MED</span></td>
+      <td class="dim-text">Via China demand &amp; CNH</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">2 Jun</span></td>
+      <td><span class="event-name">AU GDP (Q1 2026)</span></td>
+      <td class="event-detail">Growth modest, confirming subdued domestic demand. Consistent with RBA cutting — AUD offered on release before stabilising</td>
+      <td><span class="impact-badge impact-high">HIGH</span></td>
+      <td class="dim-text">Direct — growth / RBA outlook</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">3 Jun</span></td>
+      <td><span class="event-name">China Caixin Services PMI (May)</span></td>
+      <td class="event-detail">Services PMI above 52, confirming expansion in the services sector. Positive sentiment for risk assets and AUD near-term</td>
+      <td><span class="impact-badge impact-med">MED</span></td>
+      <td class="dim-text">Via China demand channel</td>
+    </tr>
+    <tr>
+      <td><span class="event-date">5 Jun</span></td>
+      <td><span class="event-name">AU Trade Balance (Apr)</span></td>
+      <td class="event-detail">Trade surplus narrowed as commodity export values softened with iron ore prices; import demand subdued domestically</td>
+      <td><span class="impact-badge impact-med">MED</span></td>
+      <td class="dim-text">Terms of trade signal</td>
+    </tr>
+  </tbody>
+</table>
+"""
+
+# ---------------------------------------------------------------------------
 # HTML TEMPLATE
 # ---------------------------------------------------------------------------
 html = f"""<!DOCTYPE html>
@@ -2447,6 +2557,18 @@ body {{
     </tr>
   </tbody>
 </table>
+</div>
+
+
+<!-- ─── 10 PREVIOUS CALENDAR EVENTS ─── -->
+<div class="section-header">
+  <span class="sec-num">10</span>
+  <span class="sec-title">Previous Calendar Events — Last 30 Days</span>
+  <div class="sec-line"></div>
+</div>
+
+<div class="section-surface">
+{PREV_EVENTS_HTML}
 </div>
 
 
