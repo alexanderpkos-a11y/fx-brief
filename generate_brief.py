@@ -297,6 +297,7 @@ HIST_TICKERS = {
     'usdcnh':   'USDCNY=X',
     'spx':      '^GSPC',
     'iron_ore': 'TIO=F',
+    'vix':      '^VIX',
 }
 
 print('Fetching Yahoo Finance tickers (parallel)…')
@@ -369,6 +370,7 @@ _chart_driver_hists = {
     'usdcnh':   _hist_results.get('usdcnh', {}),
     'iron_ore': _hist_results.get('iron_ore', {}),
     'dxy':      _hist_results.get('dxy', {}),
+    'vix':      _hist_results.get('vix', {}),
 }
 _driver_series = _build_driver_series(_hist_results.get('audusd', {}), _chart_driver_hists)
 for _k in _chart_driver_hists:
@@ -1442,6 +1444,194 @@ DC_DXY_SCRIPT = """<script>
 })();
 </script>"""
 
+DC_VIX_HTML = """
+<div class="stats">
+  <div class="card">
+    <div class="lbl"><span class="dot aud"></span>AUD/USD &mdash; latest</div>
+    <div class="val" id="dc_vix_audVal">&mdash;</div>
+    <div class="chg" id="dc_vix_audChg">&mdash;</div>
+  </div>
+  <div class="card">
+    <div class="lbl" style="color:#facc15">VIX &mdash; latest</div>
+    <div class="val" id="dc_vix_drvVal">&mdash;</div>
+    <div class="chg" id="dc_vix_drvChg">&mdash;</div>
+  </div>
+  <div class="card">
+    <div class="lbl">Window correlation</div>
+    <div class="val" id="dc_vix_corrVal">&mdash;</div>
+    <div id="dc_vix_corrToggle" class="presets" style="margin-top:8px">
+      <button class="preset active" data-w="20">20d</button>
+      <button class="preset" data-w="60">60d</button>
+    </div>
+  </div>
+</div>
+
+<div class="panel-box">
+  <div class="panel-title">AUD/USD and VIX</div>
+  <div class="legend">
+    <span><span class="dot aud"></span>AUD/USD (LHS)</span>
+    <span><span class="dot" style="background:#facc15"></span>VIX (RHS)</span>
+  </div>
+  <div class="chart-holder"><canvas id="dc_vix_chart"></canvas></div>
+
+  <div class="slider-wrap">
+    <div class="slider-head">
+      <div class="k">Date range</div>
+      <div class="range-readout"><b id="dc_vix_start">&mdash;</b> &nbsp;&rarr;&nbsp; <b id="dc_vix_end">&mdash;</b></div>
+    </div>
+    <div class="dual">
+      <div class="track"></div>
+      <div class="track-fill" id="dc_vix_fill"></div>
+      <input type="range" id="dc_vix_minR" min="0" max="100" value="0">
+      <input type="range" id="dc_vix_maxR" min="0" max="100" value="100">
+    </div>
+    <div class="presets" id="dc_vix_presets">
+      <button class="preset active" data-y="1">1Y</button>
+      <button class="preset" data-y="2">2Y</button>
+      <button class="preset" data-y="5">5Y</button>
+      <button class="preset" data-y="0">Max</button>
+    </div>
+  </div>
+</div>
+<p class="source">Source: Yahoo Finance (^VIX). VIX is the equity-market volatility (&ldquo;fear&rdquo;) gauge &mdash; risk-off spikes typically coincide with AUD/USD weakness (negative correlation). Rolling Pearson correlation of log-returns vs AUD/USD, selected range.</p>
+"""
+
+DC_VIX_SCRIPT = """<script>
+(function(){
+  var SER = DRIVER_SERIES['vix'];
+  if (!SER || !SER.length) return;
+  var N = SER.length;
+  var activeCorrKey = 'r20';
+
+  var audValEl  = document.getElementById('dc_vix_audVal');
+  var audChgEl  = document.getElementById('dc_vix_audChg');
+  var drvValEl  = document.getElementById('dc_vix_drvVal');
+  var drvChgEl  = document.getElementById('dc_vix_drvChg');
+  var corrValEl = document.getElementById('dc_vix_corrVal');
+  var startEl   = document.getElementById('dc_vix_start');
+  var endEl     = document.getElementById('dc_vix_end');
+  var fillEl    = document.getElementById('dc_vix_fill');
+  var minR      = document.getElementById('dc_vix_minR');
+  var maxR      = document.getElementById('dc_vix_maxR');
+  minR.max = maxR.max = N - 1;
+
+  var AUD_COLOR = '#5b9bd5';
+  var DRV_COLOR = '#facc15';
+
+  var chart = new Chart(document.getElementById('dc_vix_chart').getContext('2d'), {
+    type: 'line',
+    data: { labels: [], datasets: [
+      { label: 'AUD/USD', data: [], borderColor: AUD_COLOR, borderWidth: 1.5,
+        pointRadius: 0, tension: 0.2, spanGaps: true, yAxisID: 'y_aud' },
+      { label: 'VIX', data: [], borderColor: DRV_COLOR, borderWidth: 1.5,
+        pointRadius: 0, tension: 0.2, spanGaps: true, yAxisID: 'y_drv' },
+    ]},
+    options: {
+      animation: false, responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { ticks: { maxTicksLimit: 8, color: 'rgba(255,255,255,.35)', font: { size: 11 } },
+             grid: { color: 'rgba(142,162,189,.08)' } },
+        y_aud: { position: 'left',
+                 ticks: { color: AUD_COLOR, font: { size: 11 }, callback: function(v){ return v.toFixed(4); } },
+                 grid: { color: 'rgba(142,162,189,.08)' } },
+        y_drv: { position: 'right', grid: { drawOnChartArea: false },
+                 ticks: { color: DRV_COLOR, font: { size: 11 }, callback: function(v){ return v.toFixed(1); } } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(10,18,35,.92)', borderColor: 'rgba(255,255,255,.1)',
+          borderWidth: 1, titleColor: 'rgba(255,255,255,.6)', bodyColor: '#fff',
+          callbacks: {
+            label: function(ctx) {
+              if (ctx.datasetIndex === 0) return ' AUD/USD: ' + (ctx.raw || 0).toFixed(4);
+              return ' VIX: ' + (ctx.raw || 0).toFixed(2);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  function fmtPct(val, prev) {
+    if (!val || !prev) return '';
+    var p = (val - prev) / prev * 100;
+    return (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
+  }
+
+  function applySlice() {
+    var lo = parseInt(minR.value), hi = parseInt(maxR.value) + 1;
+    if (hi > N) hi = N;
+    if (lo >= hi - 1) lo = Math.max(0, hi - 2);
+    var slice = SER.slice(lo, hi);
+
+    chart.data.labels           = slice.map(function(r){ return r.date; });
+    chart.data.datasets[0].data = slice.map(function(r){ return r.aud; });
+    chart.data.datasets[1].data = slice.map(function(r){ return r.drv; });
+    chart.update('none');
+
+    var last = slice[slice.length - 1] || {};
+    var prev = slice[slice.length - 2] || {};
+    audValEl.textContent = last.aud ? last.aud.toFixed(4) : '\\u2014';
+    audChgEl.textContent = fmtPct(last.aud, prev.aud) || '\\u2014';
+    drvValEl.textContent = last.drv ? last.drv.toFixed(2) : '\\u2014';
+    drvChgEl.textContent = fmtPct(last.drv, prev.drv) || '\\u2014';
+
+    var corrs = slice.map(function(r){ return r[activeCorrKey]; }).filter(function(v){ return v != null; });
+    var avg = corrs.length ? corrs.reduce(function(a,b){ return a+b; }, 0) / corrs.length : null;
+    corrValEl.textContent = avg !== null ? avg.toFixed(2) : '\\u2014';
+    corrValEl.style.color = avg === null ? '' : (avg > 0.1 ? '#6fcf8e' : avg < -0.1 ? '#e8746a' : 'var(--text)');
+
+    startEl.textContent = (slice[0] || {}).date || '\\u2014';
+    endEl.textContent   = last.date || '\\u2014';
+    var pLo = lo / (N-1) * 100, pHi = parseInt(maxR.value) / (N-1) * 100;
+    fillEl.style.left = pLo + '%'; fillEl.style.width = (pHi - pLo) + '%';
+  }
+
+  minR.addEventListener('input', function(){
+    if (parseInt(minR.value) >= parseInt(maxR.value)) minR.value = parseInt(maxR.value) - 1;
+    applySlice();
+  });
+  maxR.addEventListener('input', function(){
+    if (parseInt(maxR.value) <= parseInt(minR.value)) maxR.value = parseInt(minR.value) + 1;
+    applySlice();
+  });
+
+  document.getElementById('dc_vix_presets').addEventListener('click', function(e){
+    var btn = e.target.closest('[data-y]');
+    if (!btn) return;
+    var yrs = parseInt(btn.dataset.y), lo = 0;
+    if (yrs > 0) {
+      var cutoff = new Date(SER[N-1].date);
+      cutoff.setFullYear(cutoff.getFullYear() - yrs);
+      var ct = cutoff.toISOString().slice(0,10);
+      for (var i = 0; i < N; i++) { if (SER[i].date >= ct) { lo = i; break; } }
+    }
+    minR.value = lo; maxR.value = N - 1;
+    document.querySelectorAll('#dc_vix_presets .preset').forEach(function(b){ b.classList.remove('active'); });
+    btn.classList.add('active');
+    applySlice();
+  });
+
+  document.getElementById('dc_vix_corrToggle').addEventListener('click', function(e){
+    var btn = e.target.closest('[data-w]');
+    if (!btn) return;
+    activeCorrKey = btn.dataset.w === '60' ? 'r60' : 'r20';
+    document.querySelectorAll('#dc_vix_corrToggle .preset').forEach(function(b){ b.classList.remove('active'); });
+    btn.classList.add('active');
+    applySlice();
+  });
+
+  (function(){
+    var cutoff = new Date(SER[N-1].date); cutoff.setFullYear(cutoff.getFullYear() - 1);
+    var ct = cutoff.toISOString().slice(0,10), lo = 0;
+    for (var i = 0; i < N; i++) { if (SER[i].date >= ct) { lo = i; break; } }
+    minR.value = lo; maxR.value = N - 1; applySlice();
+  })();
+})();
+</script>"""
+
 # ---------------------------------------------------------------------------
 # DRIVER ATTRIBUTION PANEL  (replaces slider-based beta sensitivity panel)
 # ---------------------------------------------------------------------------
@@ -2267,10 +2457,22 @@ body {{
 </div>
 
 
-
-<!-- ─── 06 RATE DIFFERENTIALS ─── -->
-<div class="section-header">
+<!-- ─── AUD/USD vs VIX ─── -->
+<div class="section-header" style="margin-top:36px">
   <span class="sec-num">06</span>
+  <span class="sec-title" style="font-size:.65rem;letter-spacing:.14em">AUD/USD &amp; VIX</span>
+  <div class="sec-line"></div>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--panel-edge);border-radius:12px;padding:22px 26px 18px">
+  {DC_VIX_HTML}
+</div>
+
+
+
+<!-- ─── 07 RATE DIFFERENTIALS ─── -->
+<div class="section-header">
+  <span class="sec-num">07</span>
   <span class="sec-title">Rate Differentials &amp; Yield Curve</span>
   <div class="sec-line"></div>
 </div>
@@ -2279,9 +2481,9 @@ body {{
 
 
 
-<!-- ─── 07 COT POSITIONING ─── -->
+<!-- ─── 08 COT POSITIONING ─── -->
 <div class="section-header">
-  <span class="sec-num">07</span>
+  <span class="sec-num">08</span>
   <span class="sec-title">COT Positioning — CFTC TFF (AUD Futures)</span>
   <div class="sec-line"></div>
 </div>
@@ -2379,9 +2581,9 @@ body {{
 </div>
 
 
-<!-- ─── 08 COMMODITIES & MARKETS ─── -->
+<!-- ─── 09 COMMODITIES & MARKETS ─── -->
 <div class="section-header">
-  <span class="sec-num">08</span>
+  <span class="sec-num">09</span>
   <span class="sec-title">Commodities &amp; Related Markets</span>
   <div class="sec-line"></div>
 </div>
@@ -2452,9 +2654,9 @@ body {{
 </div>
 
 
-<!-- ─── 09 EVENT RISK CALENDAR ─── -->
+<!-- ─── 10 EVENT RISK CALENDAR ─── -->
 <div class="section-header">
-  <span class="sec-num">09</span>
+  <span class="sec-num">10</span>
   <span class="sec-title">Event Risk Calendar</span>
   <div class="sec-line"></div>
 </div>
@@ -2560,9 +2762,9 @@ body {{
 </div>
 
 
-<!-- ─── 10 PREVIOUS CALENDAR EVENTS ─── -->
+<!-- ─── 11 PREVIOUS CALENDAR EVENTS ─── -->
 <div class="section-header">
-  <span class="sec-num">10</span>
+  <span class="sec-num">11</span>
   <span class="sec-title">Previous Calendar Events — Last 30 Days</span>
   <div class="sec-line"></div>
 </div>
@@ -2598,6 +2800,7 @@ body {{
 {DC_CNH_SCRIPT}
 {DC_IRON_SCRIPT}
 {DC_DXY_SCRIPT}
+{DC_VIX_SCRIPT}
 
 
 </body>
