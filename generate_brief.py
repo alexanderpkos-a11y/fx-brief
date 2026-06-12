@@ -22,7 +22,7 @@ AV_API_KEY = os.environ.get('AV_API_KEY', '')  # set via GitHub Secret or local 
 # LIVE FETCH HELPERS
 # ---------------------------------------------------------------------------
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, date as _date
+from datetime import datetime, date as _date, timedelta
 
 _UA = 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
 
@@ -1636,9 +1636,135 @@ DC_VIX_SCRIPT = """<script>
 # DRIVER ATTRIBUTION PANEL  (replaces slider-based beta sensitivity panel)
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# PREVIOUS CALENDAR EVENTS  (last ~30 days — update as events roll through)
+# EVENT CALENDAR  (single source of truth — auto-rolls by today's date)
 # ---------------------------------------------------------------------------
-PREV_EVENTS_HTML = """
+# One list drives BOTH the forward "Event Risk Calendar" and the trailing
+# "Previous Calendar Events" table. Classification is automatic:
+#   • end >= today            → upcoming  (forward table, shows `consensus`)
+#   • cutoff <= end < today    → previous  (last-30-days table, shows `outcome`)
+# To maintain: add new events with a `consensus`; once an event has happened,
+# fill its `outcome`. No need to move rows or touch dates by hand — the date
+# math below sorts everything into the right table on each run.
+#   date      = ISO start date (used for ordering + the display label)
+#   end       = ISO end date for multi-day events (optional; defaults to date)
+#   label     = display override, e.g. "16–17 Jun" or "~26 Jun" (optional)
+#   impact    = 'high' | 'med' | 'low'
+#   outcome   = recap once it has occurred; if missing once past, shows a
+#               "recap pending" placeholder so it's obvious it needs filling.
+EVENTS = [
+    # ── already occurred ──
+    {'date': '2026-05-13', 'name': 'US CPI (Apr)', 'impact': 'high', 'sens': 'Via USD &amp; risk sentiment',
+     'consensus': 'Core CPI key for FOMC dot-plot guidance.',
+     'outcome': 'Core CPI modestly below consensus; USD softened on print, AUD and risk assets recovered. FOMC cut expectations edged forward'},
+    {'date': '2026-05-15', 'name': 'AU Employment (Apr)', 'impact': 'high', 'sens': 'Direct — RBA reaction function',
+     'consensus': 'Labour force survey; key RBA input.',
+     'outcome': 'Labour market softened; unemployment nudged higher, reinforcing RBA cut optionality. Lifted Jun cut probability to ~24%'},
+    {'date': '2026-05-16', 'name': 'CN Industrial Output / Retail (Apr)', 'impact': 'med', 'sens': 'Via China demand channel',
+     'consensus': 'April activity data.',
+     'outcome': 'Industrial output in line with estimates; retail sales below consensus. Soft domestic demand weighed on iron ore and CNH'},
+    {'date': '2026-05-20', 'name': 'RBA Meeting Minutes', 'impact': 'med', 'sens': 'Direct — RBA guidance',
+     'consensus': 'Minutes of the May board meeting.',
+     'outcome': 'Minutes showed board discussed case for a cut; dovish lean confirmed. AUD slipped on release as markets firmed Jun cut bets'},
+    {'date': '2026-05-23', 'name': 'CFTC COT Release (May-20 snapshot)', 'impact': 'med', 'sens': 'Positioning signal',
+     'consensus': 'Weekly positioning snapshot.',
+     'outcome': 'Positioning showed AM net longs rebuilding; LF net positioning continued to extend, broadly supportive backdrop for AUD'},
+    {'date': '2026-05-27', 'name': 'US PCE (Apr)', 'impact': 'high', 'sens': 'Via Fed pricing &amp; USD',
+     'consensus': "Fed's preferred inflation measure.",
+     'outcome': 'Core PCE in line with expectations; no fresh hawkish catalyst. Fed cut timing little changed, AUD steady into month-end'},
+    {'date': '2026-05-29', 'end': '2026-05-30', 'label': '29–30 May', 'name': 'China NBS PMI (May)', 'impact': 'med', 'sens': 'Via China demand &amp; CNH',
+     'consensus': 'Manufacturing + services PMI.',
+     'outcome': 'Manufacturing PMI held in expansion; services solid. Positive signal for commodity demand and AUD via China growth channel'},
+    {'date': '2026-06-02', 'name': 'AU GDP (Q1 2026)', 'impact': 'high', 'sens': 'Direct — growth / RBA outlook',
+     'consensus': 'Q1 national accounts.',
+     'outcome': 'Growth modest, confirming subdued domestic demand. Consistent with RBA cutting — AUD offered on release before stabilising'},
+    {'date': '2026-06-03', 'name': 'China Caixin Services PMI (May)', 'impact': 'med', 'sens': 'Via China demand channel',
+     'consensus': 'Private-survey services gauge.',
+     'outcome': 'Services PMI above 52, confirming expansion in the services sector. Positive sentiment for risk assets and AUD near-term'},
+    {'date': '2026-06-05', 'name': 'AU Trade Balance (Apr)', 'impact': 'med', 'sens': 'Terms of trade signal',
+     'consensus': 'Goods + services trade balance.',
+     'outcome': 'Trade surplus narrowed as commodity export values softened with iron ore prices; import demand subdued domestically'},
+    {'date': '2026-06-06', 'name': 'US Nonfarm Payrolls (May)', 'impact': 'high', 'sens': 'Via USD &amp; risk sentiment',
+     'consensus': 'May payrolls + wage growth.',
+     'outcome': 'Payrolls broadly in line, wage growth easing at the margin. USD softened modestly; AUD/USD held firm near the top of its recent range'},
+    {'date': '2026-06-07', 'end': '2026-06-09', 'label': '7–9 Jun', 'name': 'China Trade Balance (May)', 'impact': 'high', 'sens': 'Via CNH &amp; commodity demand',
+     'consensus': 'Exports + imports gauge.',
+     'outcome': 'Exports steady; imports still soft, pointing to subdued domestic demand. Mixed for iron ore and the commodity-AUD channel'},
+    {'date': '2026-06-10', 'name': 'China CPI / PPI (May)', 'impact': 'med', 'sens': 'Via commodity channel',
+     'consensus': 'Inflation + factory-gate prices.',
+     'outcome': 'PPI deflation persisted but showed tentative stabilisation; CPI subdued. Limited fresh impulse for the iron ore demand story'},
+    {'date': '2026-06-11', 'name': 'US CPI (May)', 'impact': 'high', 'sens': 'Via USD &amp; risk sentiment',
+     'consensus': 'Core CPI ahead of the FOMC.',
+     'outcome': 'Core CPI in line to slightly soft; reinforced market pricing for Fed cuts later in the year. USD eased, AUD supported into the FOMC'},
+    # ── upcoming (fill `outcome` once each has occurred) ──
+    {'date': '2026-06-12', 'name': 'AU Employment (May)', 'impact': 'high', 'sens': 'Direct — RBA reaction function',
+     'consensus': 'Labour force survey — last major domestic input before the RBA. Weak jobs → Jul/Aug cut probability rises sharply'},
+    {'date': '2026-06-13', 'name': 'CFTC COT Release', 'impact': 'med', 'sens': 'Positioning signal',
+     'consensus': 'Jun-09 snapshot; track AM net vs prior ~+1k and LF net vs ~+59k. Rebuild in net longs = positioning tailwind for AUD'},
+    {'date': '2026-06-16', 'name': 'CN Industrial Output / Retail (May)', 'impact': 'med', 'sens': 'Via China demand channel',
+     'consensus': 'May activity data; industrial output drives iron ore demand, retail a proxy for domestic stimulus traction'},
+    {'date': '2026-06-16', 'end': '2026-06-17', 'label': '16–17 Jun', 'name': 'RBA Board Meeting', 'impact': 'high', 'sens': 'Primary AUD driver',
+     'consensus': 'Rate decision + press conference. ~20% cut probability; a cut takes cash to 4.10%. Cut = AUD downside; hold = relief rally'},
+    {'date': '2026-06-17', 'end': '2026-06-18', 'label': '17–18 Jun', 'name': 'FOMC Meeting', 'impact': 'high', 'sens': 'Via USD &amp; rate differential',
+     'consensus': 'Rate decision + SEP + dot plot. Hold at 4.25–4.50% expected; dot-plot cut timing key for the AU-US rate diff and AUD'},
+    {'date': '2026-06-17', 'label': '~17 Jun', 'name': 'US Retail Sales (May)', 'impact': 'med', 'sens': 'Via USD &amp; risk',
+     'consensus': 'Consumer spending resilience gauge; a strong print supports USD and compresses AUD/USD'},
+    {'date': '2026-06-26', 'label': '~26 Jun', 'name': 'US PCE (May)', 'impact': 'high', 'sens': 'Via Fed pricing &amp; USD',
+     'consensus': "Fed's preferred inflation measure; sticky core PCE = fewer cuts priced, USD bid into month-end"},
+    {'date': '2026-06-30', 'name': 'China NBS PMI (Jun)', 'impact': 'med', 'sens': 'Via China demand &amp; CNH',
+     'consensus': 'Manufacturing + services PMI; early read on Q3 China demand — an AUD proxy for the commodity outlook'},
+    {'date': '2026-07-03', 'name': 'US Nonfarm Payrolls (Jun)', 'impact': 'high', 'sens': 'Via USD &amp; risk sentiment',
+     'consensus': 'First major US labour read post-FOMC; soft print firms cut expectations, pressures USD and supports AUD'},
+    {'date': '2026-07-10', 'label': '~10 Jul', 'name': 'China CPI / PPI (Jun)', 'impact': 'med', 'sens': 'Via commodity channel',
+     'consensus': 'Watch for PPI moving out of deflation — a stabilisation signal would support iron ore and the commodity-AUD channel'},
+    {'date': '2026-07-15', 'name': 'China Q2 GDP + Activity', 'impact': 'high', 'sens': 'Via China demand &amp; CNH',
+     'consensus': 'Q2 GDP with June industrial output and retail sales; primary read on China demand momentum into H2'},
+    {'date': '2026-07-17', 'name': 'AU Employment (Jun)', 'impact': 'high', 'sens': 'Direct — RBA reaction function',
+     'consensus': 'Labour force survey; sustained softening builds the case for an August RBA cut and weighs on AUD'},
+]
+
+_PREV_WINDOW_DAYS = 30  # how far back the "Previous Calendar Events" table reaches
+
+def _ev_label(e):
+    """Display label: explicit override, else '12 Jun' from the ISO start date."""
+    if e.get('label'):
+        return e['label']
+    return datetime.strptime(e['date'], '%Y-%m-%d').strftime('%-d %b')
+
+def _ev_rows(events, field):
+    """Render <tr> rows for a list of events using `field` ('consensus' or 'outcome')."""
+    cls = {'high': 'impact-high', 'med': 'impact-med', 'low': 'impact-low'}
+    txt = {'high': 'HIGH', 'med': 'MED', 'low': 'LOW'}
+    rows = []
+    for e in events:
+        imp = e.get('impact', 'med')
+        detail = e.get(field)
+        if not detail:
+            detail = '<span class="dim-text faint-italic">recap pending</span>'
+        rows.append(
+            '    <tr>\n'
+            f'      <td><span class="event-date">{_ev_label(e)}</span></td>\n'
+            f'      <td><span class="event-name">{e["name"]}</span></td>\n'
+            f'      <td class="event-detail">{detail}</td>\n'
+            f'      <td><span class="impact-badge {cls[imp]}">{txt[imp]}</span></td>\n'
+            f'      <td class="dim-text">{e["sens"]}</td>\n'
+            '    </tr>'
+        )
+    return '\n'.join(rows)
+
+# Auto-classify against today's date (an event leaves the forward table only
+# once its END date has passed; multi-day events stay until fully done).
+_today_iso  = today.isoformat()
+_cutoff_iso = (today - timedelta(days=_PREV_WINDOW_DAYS)).isoformat()
+def _ev_end(e): return e.get('end', e['date'])
+
+_upcoming_events = sorted([e for e in EVENTS if _ev_end(e) >= _today_iso], key=lambda e: e['date'])
+_previous_events = sorted([e for e in EVENTS if _cutoff_iso <= _ev_end(e) < _today_iso], key=lambda e: e['date'])
+
+EVENTS_FWD_ROWS  = _ev_rows(_upcoming_events, 'consensus')
+EVENTS_PREV_ROWS = _ev_rows(_previous_events, 'outcome')
+print(f'Event calendar: {len(_upcoming_events)} upcoming, {len(_previous_events)} in last {_PREV_WINDOW_DAYS}d')
+
+PREV_EVENTS_HTML = f"""
 <table class="events-table">
   <thead>
     <tr>
@@ -1650,104 +1776,7 @@ PREV_EVENTS_HTML = """
     </tr>
   </thead>
   <tbody>
-    <tr>
-      <td><span class="event-date">13 May</span></td>
-      <td><span class="event-name">US CPI (Apr)</span></td>
-      <td class="event-detail">Core CPI modestly below consensus; USD softened on print, AUD and risk assets recovered. FOMC cut expectations edged forward</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Via USD &amp; risk sentiment</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">15 May</span></td>
-      <td><span class="event-name">AU Employment (Apr)</span></td>
-      <td class="event-detail">Labour market softened; unemployment nudged higher, reinforcing RBA cut optionality. Lifted Jun cut probability to ~24%</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Direct — RBA reaction function</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">16 May</span></td>
-      <td><span class="event-name">CN Industrial Output / Retail (Apr)</span></td>
-      <td class="event-detail">Industrial output in line with estimates; retail sales below consensus. Soft domestic demand weighed on iron ore and CNH</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Via China demand channel</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">20 May</span></td>
-      <td><span class="event-name">RBA Meeting Minutes</span></td>
-      <td class="event-detail">Minutes showed board discussed case for a cut; dovish lean confirmed. AUD slipped on release as markets firmed Jun cut bets</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Direct — RBA guidance</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">23 May</span></td>
-      <td><span class="event-name">CFTC COT Release (May-20 snapshot)</span></td>
-      <td class="event-detail">Positioning showed AM net longs rebuilding; LF net positioning continued to extend, broadly supportive backdrop for AUD</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Positioning signal</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">27 May</span></td>
-      <td><span class="event-name">US PCE (Apr)</span></td>
-      <td class="event-detail">Core PCE in line with expectations; no fresh hawkish catalyst. Fed cut timing little changed, AUD steady into month-end</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Via Fed pricing &amp; USD</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">29–30 May</span></td>
-      <td><span class="event-name">China NBS PMI (May)</span></td>
-      <td class="event-detail">Manufacturing PMI held in expansion; services solid. Positive signal for commodity demand and AUD via China growth channel</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Via China demand &amp; CNH</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">2 Jun</span></td>
-      <td><span class="event-name">AU GDP (Q1 2026)</span></td>
-      <td class="event-detail">Growth modest, confirming subdued domestic demand. Consistent with RBA cutting — AUD offered on release before stabilising</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Direct — growth / RBA outlook</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">3 Jun</span></td>
-      <td><span class="event-name">China Caixin Services PMI (May)</span></td>
-      <td class="event-detail">Services PMI above 52, confirming expansion in the services sector. Positive sentiment for risk assets and AUD near-term</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Via China demand channel</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">5 Jun</span></td>
-      <td><span class="event-name">AU Trade Balance (Apr)</span></td>
-      <td class="event-detail">Trade surplus narrowed as commodity export values softened with iron ore prices; import demand subdued domestically</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Terms of trade signal</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">6 Jun</span></td>
-      <td><span class="event-name">US Nonfarm Payrolls (May)</span></td>
-      <td class="event-detail">Payrolls broadly in line, wage growth easing at the margin. USD softened modestly; AUD/USD held firm near the top of its recent range</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Via USD &amp; risk sentiment</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">7–9 Jun</span></td>
-      <td><span class="event-name">China Trade Balance (May)</span></td>
-      <td class="event-detail">Exports steady; imports still soft, pointing to subdued domestic demand. Mixed for iron ore and the commodity-AUD channel</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Via CNH &amp; commodity demand</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">10 Jun</span></td>
-      <td><span class="event-name">China CPI / PPI (May)</span></td>
-      <td class="event-detail">PPI deflation persisted but showed tentative stabilisation; CPI subdued. Limited fresh impulse for the iron ore demand story</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Via commodity channel</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">11 Jun</span></td>
-      <td><span class="event-name">US CPI (May)</span></td>
-      <td class="event-detail">Core CPI in line to slightly soft; reinforced market pricing for Fed cuts later in the year. USD eased, AUD supported into the FOMC</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Via USD &amp; risk sentiment</td>
-    </tr>
+{EVENTS_PREV_ROWS}
   </tbody>
 </table>
 """
@@ -2680,90 +2709,7 @@ body {{
     </tr>
   </thead>
   <tbody>
-    <tr>
-      <td><span class="event-date">12 Jun</span></td>
-      <td><span class="event-name">AU Employment (May)</span></td>
-      <td class="event-detail">Labour force survey — last major domestic input before the RBA. Weak jobs → Jul/Aug cut probability rises sharply</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Direct — RBA reaction function</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">13 Jun</span></td>
-      <td><span class="event-name">CFTC COT Release</span></td>
-      <td class="event-detail">Jun-09 snapshot; track AM net vs prior ~+1k and LF net vs ~+59k. Rebuild in net longs = positioning tailwind for AUD</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Positioning signal</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">16 Jun</span></td>
-      <td><span class="event-name">CN Industrial Output / Retail (May)</span></td>
-      <td class="event-detail">May activity data; industrial output drives iron ore demand, retail a proxy for domestic stimulus traction</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Via China demand channel</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">16–17 Jun</span></td>
-      <td><span class="event-name">RBA Board Meeting</span></td>
-      <td class="event-detail">Rate decision + press conference. ~20% cut probability; a cut takes cash to 4.10%. Cut = AUD downside; hold = relief rally</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Primary AUD driver</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">17–18 Jun</span></td>
-      <td><span class="event-name">FOMC Meeting</span></td>
-      <td class="event-detail">Rate decision + SEP + dot plot. Hold at 4.25–4.50% expected; dot-plot cut timing key for the AU-US rate diff and AUD</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Via USD &amp; rate differential</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">~17 Jun</span></td>
-      <td><span class="event-name">US Retail Sales (May)</span></td>
-      <td class="event-detail">Consumer spending resilience gauge; a strong print supports USD and compresses AUD/USD</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Via USD &amp; risk</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">~26 Jun</span></td>
-      <td><span class="event-name">US PCE (May)</span></td>
-      <td class="event-detail">Fed's preferred inflation measure; sticky core PCE = fewer cuts priced, USD bid into month-end</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Via Fed pricing &amp; USD</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">30 Jun</span></td>
-      <td><span class="event-name">China NBS PMI (Jun)</span></td>
-      <td class="event-detail">Manufacturing + services PMI; early read on Q3 China demand — an AUD proxy for the commodity outlook</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Via China demand &amp; CNH</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">3 Jul</span></td>
-      <td><span class="event-name">US Nonfarm Payrolls (Jun)</span></td>
-      <td class="event-detail">First major US labour read post-FOMC; soft print firms cut expectations, pressures USD and supports AUD</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Via USD &amp; risk sentiment</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">~10 Jul</span></td>
-      <td><span class="event-name">China CPI / PPI (Jun)</span></td>
-      <td class="event-detail">Watch for PPI moving out of deflation — a stabilisation signal would support iron ore and the commodity-AUD channel</td>
-      <td><span class="impact-badge impact-med">MED</span></td>
-      <td class="dim-text">Via commodity channel</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">15 Jul</span></td>
-      <td><span class="event-name">China Q2 GDP + Activity</span></td>
-      <td class="event-detail">Q2 GDP with June industrial output and retail sales; primary read on China demand momentum into H2</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Via China demand &amp; CNH</td>
-    </tr>
-    <tr>
-      <td><span class="event-date">17 Jul</span></td>
-      <td><span class="event-name">AU Employment (Jun)</span></td>
-      <td class="event-detail">Labour force survey; sustained softening builds the case for an August RBA cut and weighs on AUD</td>
-      <td><span class="impact-badge impact-high">HIGH</span></td>
-      <td class="dim-text">Direct — RBA reaction function</td>
-    </tr>
+{EVENTS_FWD_ROWS}
   </tbody>
 </table>
 </div>
