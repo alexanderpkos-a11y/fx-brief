@@ -16,7 +16,8 @@ import urllib.request
 import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-AV_API_KEY = os.environ.get('AV_API_KEY', '')  # set via GitHub Secret or local env
+AV_API_KEY  = os.environ.get('AV_API_KEY', '')   # set via GitHub Secret or local env
+FMP_API_KEY = os.environ.get('FMP_API_KEY', '')  # Financial Modeling Prep — US Treasury yields
 
 # ---------------------------------------------------------------------------
 # LIVE FETCH HELPERS
@@ -99,6 +100,36 @@ def _fetch_us2y_fred():
             return hist[last_date], last_date, hist
     except Exception as e:
         print(f'  [WARN] FRED DGS2: {e}')
+    return None, None, {}
+
+def _fetch_us2y_fmp(api_key, lookback_days=400):
+    """FMP treasury-rates — US 2y Treasury yield (daily, free tier).
+    Returns (rate_float, date_str, hist_dict). hist_dict is {YYYY-MM-DD: float}.
+    Empty on failure / missing key. The API key is never logged."""
+    if not api_key:
+        return None, None, {}
+    try:
+        end   = _date.today()
+        start = end - timedelta(days=lookback_days)
+        url = ('https://financialmodelingprep.com/stable/treasury-rates'
+               f'?from={start.isoformat()}&to={end.isoformat()}&apikey={api_key}')
+        raw = _curl_get(url, timeout=30)
+        recs = json.loads(raw)
+        if not isinstance(recs, list):
+            # surface the API message (e.g. restricted endpoint) without the URL/key
+            msg = recs.get('Error Message') or recs.get('message') or str(recs)
+            print(f'  [WARN] FMP treasury: {str(msg)[:120]}')
+            return None, None, {}
+        hist = {}
+        for r in recs:
+            d, y2 = r.get('date'), r.get('year2')
+            if d and y2 is not None:
+                hist[d[:10]] = float(y2)
+        if hist:
+            last_date = max(hist)
+            return hist[last_date], last_date, hist
+    except Exception as e:
+        print(f'  [WARN] FMP treasury: {e}')
     return None, None, {}
 
 def _fetch_rba_f2():
@@ -318,12 +349,16 @@ print('Fetching AU yields (RBA F2)…')
 au2y, au2y_prev, au10y, au10y_prev, _f2_date, _au2y_hist = _fetch_rba_f2()
 print(f'  AU2y={au2y}  AU10y={au10y}  ({_f2_date})  hist={len(_au2y_hist)}d')
 
-print('Fetching US 2y yield (FRED DGS2)…')
-_us2y_raw, _us2y_date_raw, _us2y_hist = _fetch_us2y_fred()
+print('Fetching US 2y yield (FMP treasury-rates → FRED fallback)…')
+_us2y_raw, _us2y_date_raw, _us2y_hist = _fetch_us2y_fmp(FMP_API_KEY)
+_us2y_src = 'FMP'
+if _us2y_raw is None:
+    _us2y_raw, _us2y_date_raw, _us2y_hist = _fetch_us2y_fred()
+    _us2y_src = 'FRED'
 us2y      = _us2y_raw
 us2y_date = (datetime.strptime(_us2y_date_raw, '%Y-%m-%d').strftime('%d %b')
              if _us2y_date_raw else '?')
-print(f'  US2y={us2y}  ({us2y_date})  hist={len(_us2y_hist)}d')
+print(f'  US2y={us2y}  ({us2y_date})  src={_us2y_src}  hist={len(_us2y_hist)}d')
 
 print('Fetching RBA cash rate & BABs (F1)…')
 rba_cash_rate, rba_babs_1m, rba_babs_3m, rba_cut_prob, _rba_f1_date = _fetch_rba_f1()
@@ -489,6 +524,7 @@ def badge(src):
         'CFTC': ('badge-cftc', 'CFTC'),
         'AV':   ('badge-av',   'AV'),
         'FRED': ('badge-av',   'FRED'),
+        'FMP':  ('badge-av',   'FMP'),
         'SCR':  ('badge-scr',  'SCR'),
     }
     cls, label = badges.get(src, ('badge-scr', src))
@@ -618,7 +654,7 @@ RD_CHART_HTML = """
     </div>
   </div>
 </div>
-<p class="source" id="rd_source">Source: FRED (US 2y) &middot; RBA Table F2 (AU 2y) &middot; spread = (AU 2y &minus; US 2y) &times; 100 bp.</p>
+<p class="source" id="rd_source">Source: FMP treasury-rates (US 2y) &middot; RBA Table F2 (AU 2y) &middot; spread = (AU 2y &minus; US 2y) &times; 100 bp.</p>
 """
 
 # Section 03 chart markup (the live COT chart; hard-stat cards follow below it).
@@ -2370,7 +2406,7 @@ body {{
   <div class="tile">
     <div class="tile-top">
       <span class="tile-label">AU&minus;US 2y Spread</span>
-      {badge('RBA')}{badge('FRED')}
+      {badge('RBA')}{badge(_us2y_src)}
     </div>
     <div class="tile-value gold">{data['spread_2y']} bp</div>
     <div class="tile-bottom">
@@ -2739,7 +2775,7 @@ body {{
   <div class="footer-sources">
     <a href="https://finance.yahoo.com" target="_blank">[YF] Yahoo Finance — FX, equities, commodities, VIX</a>
     <a href="https://www.rba.gov.au/statistics/tables/xls/f02hist.xls" target="_blank">[RBA] Reserve Bank of Australia — AU bond yields (F2 table)</a>
-    <a href="https://www.alphavantage.co" target="_blank">[AV] Alpha Vantage — US 2-year Treasury yield</a>
+    <a href="https://site.financialmodelingprep.com" target="_blank">[FMP] Financial Modeling Prep — US 2-year Treasury yield</a>
     <a href="https://www.cftc.gov/dea/futures/deacmesf.htm" target="_blank">[CFTC] CFTC TFF Report — AUD futures positioning ({cot_date})</a>
   </div>
 </footer>
