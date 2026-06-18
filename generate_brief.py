@@ -564,6 +564,67 @@ if not _m:
     raise RuntimeError("Could not locate the chart <script> block in fx_dashboard.html")
 chart_js = _m.group(0)
 
+# ---------------------------------------------------------------------------
+# EXTEND RD_SERIES WITH LIVE TAIL
+# The chart series baked into fx_dashboard.html is static (last point 29-May-26).
+# Splice live points onto the end so the chart advances each run. The long
+# 2016→ history stays intact; only dates after the last baked point are added.
+# RD_SERIES format: {"date":"YYYY-MM-DD","audusd":<px>,"spread":<bp>}
+# (spread in basis points = (AU2y% − US2y%) × 100).
+# ---------------------------------------------------------------------------
+def _extend_rd_series(js):
+    _rm = re.search(r"(RD_SERIES\s*=\s*)(\[[^\]]*\])", js)
+    if not _rm:
+        print('  [WARN] RD_SERIES: array not found in chart JS — chart left static')
+        return js
+    try:
+        series = json.loads(_rm.group(2))
+    except Exception as e:
+        print(f'  [WARN] RD_SERIES: parse failed ({e}) — chart left static')
+        return js
+    if not series:
+        return js
+    last_static = max(p['date'] for p in series)
+
+    _aud_hist = _hist_results.get('audusd', {})
+    if not _spread_hist or not _aud_hist:
+        print('  [WARN] RD_SERIES: no live spread/audusd history — chart left static')
+        return js
+    _aud_dates = sorted(_aud_hist)
+
+    def _aud_on_or_before(d):
+        # nearest AUD/USD close at or before date d (handles holiday gaps)
+        prior = [x for x in _aud_dates if x <= d]
+        return _aud_hist[prior[-1]] if prior else None
+
+    # candidate live dates strictly after the last baked point, sampled ~weekly
+    # to match the existing cadence; the final available date is always included
+    new_dates = [d for d in sorted(_spread_hist) if d > last_static]
+    added = 0
+    for i, d in enumerate(new_dates):
+        if i % 5 != 0 and d != new_dates[-1]:
+            continue
+        px = _aud_on_or_before(d)
+        if px is None:
+            continue
+        series.append({
+            'date':   d,
+            'audusd': round(px, 4),
+            'spread': round(_spread_hist[d] * 100),
+        })
+        added += 1
+
+    if not added:
+        print(f'  RD_SERIES: no new points after {last_static} (chart unchanged)')
+        return js
+    series.sort(key=lambda p: p['date'])
+    new_last = series[-1]['date']
+    print(f'  RD_SERIES: extended {last_static} → {new_last} (+{added} live points)')
+    _new_arr = json.dumps(series, separators=(',', ':'))
+    return js[:_rm.start()] + _rm.group(1) + _new_arr + js[_rm.end():]
+
+chart_js = _extend_rd_series(chart_js)
+
 # Chart component CSS (curated subset of fx_dashboard's styles; the brief's
 # design tokens already cover the rest, so only chart-specific rules + the
 # extra colour variables the chart JS reads via css() are added here).
